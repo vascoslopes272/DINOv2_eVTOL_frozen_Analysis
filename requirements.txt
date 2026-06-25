@@ -1,0 +1,11 @@
+torch
+transformers
+numpy
+pandas
+pyarrow
+openpyxl
+scikit-learn
+matplotlib
+tqdm
+pyyaml
+python-dotenv

@@ -1,0 +1,28 @@
+# =============================================================================
+# evtol_frozen_baseline — self-contained config
+# =============================================================================
+# Stage 0: preliminary frozen-DINOv2 analysis.
+# Fill in every value marked EDIT-ME before running. Paths under `paths:` are
+# resolved relative to the folder root (the directory containing this file)
+# unless given as absolute paths.
+# =============================================================================
+
+paths:
+  image_dir: "EDIT-ME"        # folder of per-figure PNGs (scanned recursively)
+  labels_excel: "EDIT-ME"     # the labelled PatSeer Excel
+  output_dir: "outputs/analysis"
+
+data:
+  patent_id_col: "EDIT-ME"          # column in the Excel holding the patent id
+  label_cols: ["EDIT-ME"]           # taxonomy axes: lift_arch, wing_type, rotor_count, propulsion, shrouded_open
+  confound_cols: ["EDIT-ME"]        # applicant, filing_year, jurisdiction
+
+analysis:
+  model: "facebook/dinov2-large"
+  layers: [18, 22, 24]
+  pooling: [cls, mean_patch]
+  batch_size: 32
+  device: "cuda:1"
+  aggregation:
+    method: "mean"          # swappable later: mean | canonical | per_figure_type
+  seed: 42
