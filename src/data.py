@@ -8,18 +8,20 @@ Two public entry points:
 
 Patent-id parsing convention
 -----------------------------
-PatSeer figure exports are typically named ``<PATENT_ID><sep><figure marker>``,
-e.g.::
+Figure exports follow the fixed convention::
 
-    US20210107642A1_fig1.png      -> patent_id="US20210107642A1", figure_type="fig1"
-    US-20210107642-A1-figure-3.png-> patent_id="US-20210107642-A1", figure_type="figure3"
-    EP1234567B1_0003.png          -> patent_id="EP1234567B1",      figure_type="0003"
-    WO2020012345A1.png            -> patent_id="WO2020012345A1",    figure_type=None
+    {RecordNumber}_{CAT}_{CPC}_p{page:03d}_c{crop:02d}.png
+
+where ``CAT`` is ``SHR`` (shrouded rotor) or ``OPN`` (open rotor), e.g.::
+
+    US2022267016A1_SHR_B64C2720_p003_c01.png
+        -> patent_id="US2022267016A1", shrouded_open="SHR",
+           cpc="B64C2720", figure_type="p003_c01"
 
 The convention is encoded in :data:`FIGURE_FILENAME_REGEX` below and is an
 ASSUMPTION — :func:`list_figures` prints a sample of parses so you can confirm
 (or adjust the regex) before trusting the mapping. ``figure_type`` here is the
-figure *marker token* parsed from the filename, NOT a semantic view type
+page/crop marker parsed from the filename, NOT a semantic view type
 (top/side/perspective), which is not recoverable from the filename alone.
 """
 
@@ -35,17 +37,17 @@ import pandas as pd
 # Image extensions we treat as figures.
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
 
-# Convention: patent id, then an optional separator + figure marker.
-#   group "patent_id"  : everything up to the figure marker (lazy)
-#   group "marker"     : the figure-indicator word (fig / figure / sheet / drw ...)
-#   group "num"        : a number attached to the marker, OR a bare trailing number
+# Convention: {RecordNumber}_{CAT}_{CPC}_p{page:03d}_c{crop:02d}
+#   group "patent_id"      : the record number (e.g. "US2022267016A1")
+#   group "shrouded_open"  : the category, "SHR" (shrouded) or "OPN" (open)
+#   group "cpc"            : the CPC code (e.g. "B64C2720")
+#   group "page" / "crop"  : zero-padded page and crop indices
 FIGURE_FILENAME_REGEX = re.compile(
-    r"^(?P<patent_id>.+?)"
-    r"(?:"
-    r"[ _\-.]*?(?P<marker>fig(?:ure)?|sheet|dr?w(?:g)?|drawing)[ _\-.]*(?P<num>\d+)?"
-    r"|"
-    r"[ _\-.]+(?P<trailing>\d+)"
-    r")?$",
+    r"^(?P<patent_id>[A-Z]{2}\w+?)"
+    r"_(?P<shrouded_open>SHR|OPN)"
+    r"_(?P<cpc>[A-Z0-9]+)"
+    r"_p(?P<page>\d{3})"
+    r"_c(?P<crop>\d{2})$",
     re.IGNORECASE,
 )
 
@@ -57,29 +59,33 @@ def _is_edit_me(value: Any) -> bool:
     return isinstance(value, str) and value.strip().upper() == "EDIT-ME"
 
 
-def parse_patent_id(stem: str) -> Tuple[str, Optional[str]]:
-    """Parse ``(patent_id, figure_type)`` from a filename stem (no extension).
+def parse_patent_id(
+    stem: str,
+) -> Tuple[str, Optional[str], Optional[str], Optional[str]]:
+    """Parse a filename stem (no extension) into its four components.
 
-    Returns the patent id and a normalized figure marker (e.g. ``"fig1"`` or
-    ``"0003"``), or ``None`` for the marker if none is present.
+    Convention: ``{RecordNumber}_{CAT}_{CPC}_p{page:03d}_c{crop:02d}``.
+
+    Returns ``(patent_id, shrouded_open, cpc, figure_type)`` where:
+        * ``patent_id``     - the record number, e.g. ``"US2022267016A1"``
+        * ``shrouded_open`` - the category ``"SHR"`` or ``"OPN"`` (upper-cased)
+        * ``cpc``           - the CPC code, e.g. ``"B64C2720"`` (upper-cased)
+        * ``figure_type``   - the ``p###_c##`` page/crop marker
+
+    If the stem does not match the convention, returns
+    ``(stem, None, None, None)`` rather than raising, so a stray file never
+    crashes a directory scan.
     """
     m = FIGURE_FILENAME_REGEX.match(stem)
     if not m:
-        return stem, None
+        return stem, None, None, None
 
-    patent_id = m.group("patent_id").strip(" _-.")
-    marker = m.group("marker")
-    num = m.group("num")
-    trailing = m.group("trailing")
+    patent_id = m.group("patent_id")
+    shrouded_open = m.group("shrouded_open").upper()
+    cpc = m.group("cpc").upper()
+    figure_type = f"p{m.group('page')}_c{m.group('crop')}"
 
-    if marker is not None:
-        figure_type = marker.lower() + (num or "")
-    elif trailing is not None:
-        figure_type = trailing
-    else:
-        figure_type = None
-
-    return patent_id, figure_type
+    return patent_id, shrouded_open, cpc, figure_type
 
 
 def list_figures(cfg: Dict[str, Any], preview: bool = True) -> pd.DataFrame:
@@ -104,17 +110,29 @@ def list_figures(cfg: Dict[str, Any], preview: bool = True) -> pd.DataFrame:
     for p in sorted(image_dir.rglob("*")):
         if not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
             continue
-        patent_id, figure_type = parse_patent_id(p.stem)
+        patent_id, shrouded_open, cpc, figure_type = parse_patent_id(p.stem)
         rows.append(
             {
                 "figure_id": p.name,
                 "patent_id": patent_id,
+                "shrouded_open": shrouded_open,
+                "cpc": cpc,
                 "figure_type": figure_type,
                 "path": str(p.resolve()),
             }
         )
 
-    df = pd.DataFrame(rows, columns=["figure_id", "patent_id", "figure_type", "path"])
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "figure_id",
+            "patent_id",
+            "shrouded_open",
+            "cpc",
+            "figure_type",
+            "path",
+        ],
+    )
 
     if preview:
         print(f"[list_figures] scanned: {image_dir}")
@@ -123,7 +141,9 @@ def list_figures(cfg: Dict[str, Any], preview: bool = True) -> pd.DataFrame:
         print(f"[list_figures] CONFIRM the parse convention "
               f"(showing first {min(PARSE_PREVIEW_N, len(df))}):")
         if len(df):
-            preview_df = df.head(PARSE_PREVIEW_N)[["figure_id", "patent_id", "figure_type"]]
+            preview_df = df.head(PARSE_PREVIEW_N)[
+                ["figure_id", "patent_id", "shrouded_open", "cpc", "figure_type"]
+            ]
             with pd.option_context("display.max_colwidth", 80):
                 print(preview_df.to_string(index=False))
         n_no_marker = int(df["figure_type"].isna().sum())
@@ -204,8 +224,20 @@ def load_labels(cfg: Dict[str, Any]) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    from config_loader import load_config
-
-    cfg = load_config()
-    figs = list_figures(cfg)
-    print(figs.head())
+    # Quick visual confirmation of parse_patent_id on known stems.
+    _examples = [
+        "US2022267016A1_SHR_B64C2720_p003_c01",
+        "EP3456789A1_OPN_B64C3902_p001_c02",
+        "DE102024105440A1_SHR_B64U1020_p012_c00",
+        "some_random_filename_that_doesnt_match",
+    ]
+    print("parse_patent_id self-test")
+    print("=" * 70)
+    for _stem in _examples:
+        _patent_id, _shrouded_open, _cpc, _figure_type = parse_patent_id(_stem)
+        print(f"stem          : {_stem}")
+        print(f"  patent_id     : {_patent_id}")
+        print(f"  shrouded_open : {_shrouded_open}")
+        print(f"  cpc           : {_cpc}")
+        print(f"  figure_type   : {_figure_type}")
+        print("-" * 70)
