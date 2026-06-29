@@ -17,6 +17,12 @@ data:
   # NOTE: shrouded_open (SHR/OPN) comes from the FILENAME (parse_patent_id), not
   # the Excel — list_figures already provides it as a per-figure column.
   label_cols: []                          # Excel-sourced labels only; add real columns here when needed
+  # When the configuration-type column exists in the Excel (e.g. tilt-rotor /
+  # tilt-wing / lift+cruise / multirotor / ducted), add it here, e.g.:
+  #   label_cols: ["Configuration"]
+  # Then notebooks/12_configuration_types.ipynb reads it via
+  # analysis.multiclass_labels(metadata, labels, col="Configuration").
+  config_type_col: "Configuration"        # EDIT-ME once the column exists in the Excel
   confound_cols:                          # joined by patent_id; derived axes (filing_year, is_bell) built in analysis
     - "Assignee"
     - "Assignee Country"
