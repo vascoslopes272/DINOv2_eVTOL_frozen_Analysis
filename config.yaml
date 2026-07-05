@@ -8,9 +8,24 @@
 # =============================================================================
 
 paths:
-  image_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1627_DS/Shrouded vs Openrotor/Images Processed"        # folder of per-figure PNGs (scanned recursively)
+  image_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1627_DS/Shrouded vs Openrotor/Images Processed"        # LEGACY 1627_DS set (data.list_figures filename parsing)
+  # Stage-02 manifests from Patent-Labelling-Tools (processor.process_batch) —
+  # one CSV per batch mapping wizard Image_Path -> processed 518x518 PNG plus
+  # per-image reviewer labels. Drives data.list_figures_manifest (notebook 10)
+  # and labels.apply_processing_manifest (notebook 11).
+  processing_manifest_glob: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1639_DS/data/processed/*/processing_manifest_*.csv"
+  # Patent-Labelling-Tools' 02a_preprocessing output (Review sheet) — source of
+  # T1 duplicateId/isDuplicate links. Drives data.list_figures_manifest's
+  # dedupe_architectures=True (notebook 10): when a patent is a labelled
+  # duplicate of another, only the chain ROOT's main image is kept, so the
+  # same physical architecture filed under N patents doesn't count as N
+  # separate points in the embedding QC / probes.
+  reviewed_xlsx_glob: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1639_DS/data/reviewed xlsxs/Review_postprocess_*.xlsx"
   labels_excel: "/mnt/storage_11tb/Drive_files_to_syncronize/2 - Patente & Validation/3 -Raw_Patent_Exports_PatSeer_&Gold_Standard/1639__dataset_08_06_26.xlsx"     # the labelled PatSeer Excel
-  output_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/4 - Intelligence Models & Post Process Outputs/Preliminary_analysis/outputs/analysis"
+  # NOTE: notebook 10 reloads cached embeddings blindly from output_dir/embeddings,
+  # so this points at a NEW folder for the 1639_DS 518px set (the old 1627_DS
+  # 224px run stays untouched in .../outputs/analysis).
+  output_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/4 - Intelligence Models & Post Process Outputs/Preliminary_analysis/outputs/analysis_1639_518"
 
 data:
   patent_id_col: "Record Number"          # column in the Excel holding the patent id
@@ -33,8 +48,42 @@ analysis:
   model: "facebook/dinov2-large"
   layers: [18, 22, 24]
   pooling: [cls, mean_patch]
-  batch_size: 32
+  # 518 = DINOv2/14's native hi-res input (37x37 patches). Overrides the HF
+  # processor default (256-resize + 224-crop) which would otherwise silently
+  # downscale the Stage-02 518px squares. Set to 0 for the legacy 224 behaviour.
+  input_size: 518
+  # 518px -> 1370 tokens/image vs 257 at 224px: ~5x activation memory with
+  # output_hidden_states=True. 32 fit at 224; start at 16 for 518 and drop
+  # to 8 if you OOM.
+  batch_size: 16
   device: "cuda:1"
   aggregation:
     method: "mean"          # swappable later: mean | canonical | per_figure_type
   seed: 42
+
+# ── Taxonomy structure-separation study (notebook 11_taxonomy_*) ─────────────
+taxonomy:
+  # NOTE (2026-07-06): Patent-Labelling-Tools moved wizard exports out of the
+  # storage root into "data/reviewed xlsxs/" — this single-file path is stale
+  # and will 404 against the old location. Repointed at the raw export;
+  # pooling in Batch_05 here (to match notebook 10's dedupe_architectures) is
+  # a separate follow-up, not done yet.
+  wizard_excel: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1639_DS/data/reviewed xlsxs/reviewed_patents_Batch_01.xlsx"
+  metadata_excel: "/mnt/storage_11tb/Drive_files_to_syncronize/2 - Patente & Validation/3 -Raw_Patent_Exports_PatSeer_&Gold_Standard/1639__dataset_08_06_26.xlsx"
+  output_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/4 - Intelligence Models & Post Process Outputs/Preliminary_analysis/outputs/analysis_taxonomy"
+  main_arch_only: true        # feed only arch 1's main image for now
+  min_class_count: 15         # classes below this are flagged in the coverage table
+  year_bins: 3
+  n_folds: 5
+  reference_matrix: [22, mean_patch]   # matrix used for UMAP / clustering
+  umap_color_attrs:           # attributes colored in the Stage-2 UMAP grid
+    - G1_topType
+    - M2_wCount
+    - M2_wingConf
+    - M1_boomsPresent
+    - M1_fusShape
+    - M1_gearArch
+  confound_cols: [assignee, assignee_country, year_bin, perspective,
+                  acSty, acCol, bgSty, parts, qualityFlag]
+  external_cols: [cpc_subclass, cpc_first]   # CPC = patent-office classification
+  exclude_uncertain: false    # true -> drop architectures flagged humanUncertain

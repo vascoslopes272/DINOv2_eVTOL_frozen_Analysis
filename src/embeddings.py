@@ -57,7 +57,21 @@ def load_model(cfg: Dict[str, Any]):
     model_name = cfg["analysis"]["model"]
     device = cfg["analysis"].get("device", "cpu")
 
-    processor = AutoImageProcessor.from_pretrained(model_name)
+    # analysis.input_size overrides the HF default preprocessing (shortest
+    # edge -> 256, center-crop 224), which would silently downscale the
+    # Stage-02 518x518 squares back to 224. 518 = DINOv2/14's native hi-res
+    # input (37x37 patches). Unset/0 keeps the HF default 224 behaviour.
+    input_size = int(cfg["analysis"].get("input_size", 0) or 0)
+    if input_size:
+        processor = AutoImageProcessor.from_pretrained(
+            model_name,
+            size={"shortest_edge": input_size},
+            crop_size={"height": input_size, "width": input_size},
+        )
+        print(f"[load_model] processor overridden to {input_size}x{input_size} "
+              f"({input_size // 14}x{input_size // 14} patches/side)")
+    else:
+        processor = AutoImageProcessor.from_pretrained(model_name)
     model = AutoModel.from_pretrained(model_name)
     model.eval()
     model.to(device)

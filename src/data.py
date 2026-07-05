@@ -27,11 +27,13 @@ page/crop marker parsed from the filename, NOT a semantic view type
 
 from __future__ import annotations
 
+import glob
 import re
 import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
 # Image extensions we treat as figures.
@@ -152,6 +154,122 @@ def list_figures(cfg: Dict[str, Any], preview: bool = True) -> pd.DataFrame:
                   f"(figure_type=None) — patent_id = full stem for those.")
         print()
 
+    return df
+
+
+def resolve_duplicate_roots(cfg: Dict[str, Any]) -> Dict[str, str]:
+    """patent_id -> duplicate-chain root patent_id, pooled across every
+    Excel matching ``paths.reviewed_xlsx_glob`` (Patent-Labelling-Tools'
+    02a_preprocessing output; the T1 ``duplicateId`` link, keyed at the base
+    patent_id level — never arch-suffixed).
+
+    A patent with no duplicateId row (or a blank one) maps to itself. Chains
+    are resolved transitively (A dup-of B dup-of C -> C) and across batches,
+    since a duplicate can reference a patent reviewed in a different batch.
+    Cycle-safe: a chain that loops back on itself stops where it started.
+    """
+    pattern = cfg["paths"].get("reviewed_xlsx_glob")
+    if not pattern or _is_edit_me(pattern):
+        raise ValueError("paths.reviewed_xlsx_glob is not set in config.yaml")
+    files = sorted(glob.glob(str(pattern)))
+    if not files:
+        raise FileNotFoundError(f"no reviewed xlsx matches {pattern} — run "
+                                f"Patent-Labelling-Tools 02a_preprocessing first.")
+
+    long = pd.concat([pd.read_excel(f, sheet_name="Review") for f in files], ignore_index=True)
+
+    dup_rows = long.loc[
+        (long["Field"] == "duplicateId") & long["Value"].notna()
+        & (long["Value"].astype(str).str.strip() != "")
+    ]
+    dup_target = (
+        dup_rows.assign(Patent_ID=dup_rows["Patent_ID"].astype(str))
+        .set_index("Patent_ID")["Value"].astype(str).str.strip()
+    )
+
+    def _root(pid: str) -> str:
+        seen = set()
+        current = str(pid)
+        while current not in seen:
+            seen.add(current)
+            target = dup_target.get(current)
+            if target is None:
+                return current
+            current = target
+        return current  # cycle guard — stop where it started
+
+    all_ids = long["Patent_ID"].astype(str).unique()
+    return {pid: _root(pid) for pid in all_ids}
+
+
+def list_figures_manifest(cfg: Dict[str, Any], scope: str = "all",
+                          preview: bool = True,
+                          dedupe_architectures: bool = False) -> pd.DataFrame:
+    """Figure table from Stage-02 processing manifests — no filename parsing.
+
+    Reads every CSV matching ``paths.processing_manifest_glob`` (written by
+    Patent-Labelling-Tools' ``processor.process_batch``: one row per wizard
+    image, with the processed 518px path plus the reviewer's per-image labels).
+
+    ``scope``: ``"all"`` = every approved processed figure (dst_all);
+    ``"main"`` = only the flat canonical mains (dst_main).
+
+    ``dedupe_architectures``: when True, drops every figure belonging to a
+    patent that is a labelled duplicate (T1 ``duplicateId``, any
+    duplicateType) of another patent, keeping only the chain ROOT's figures
+    (see :func:`resolve_duplicate_roots`) — so an architecture filed under N
+    near-identical patents contributes exactly one entry, not N.
+
+    Returns the same core columns as :func:`list_figures` (``figure_id``,
+    ``patent_id``, ``figure_type``, ``path``) so it drops into
+    ``embeddings.compute_embeddings`` unchanged, plus ``arch``, ``is_main``
+    and the style labels (``bg_sty``/``bg_col``/``ac_sty``/``ac_col``).
+    """
+    pattern = cfg["paths"].get("processing_manifest_glob")
+    if not pattern or _is_edit_me(pattern):
+        raise ValueError("paths.processing_manifest_glob is not set in config.yaml")
+    files = sorted(glob.glob(str(pattern)))
+    if not files:
+        raise FileNotFoundError(f"no manifest matches {pattern} — run "
+                                f"Patent-Labelling-Tools 02_processing first.")
+
+    m = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    m = m[m["processed"] == True]                                # noqa: E712
+    path_col = {"all": "dst_all", "main": "dst_main"}[scope]
+    m = m[m[path_col].notna()]
+
+    df = pd.DataFrame({
+        "figure_id": m[path_col].map(lambda p: Path(str(p)).name),
+        "patent_id": m["base_patent_id"],
+        "figure_type": np.where(m["is_main"].astype(bool), "main", "other"),
+        "path": m[path_col],
+        "arch": m["arch"],
+        "is_main": m["is_main"].astype(bool),
+        "bg_sty": m.get("bg_sty"), "bg_col": m.get("bg_col"),
+        "ac_sty": m.get("ac_sty"), "ac_col": m.get("ac_col"),
+    }).reset_index(drop=True)
+
+    missing = ~df["path"].map(lambda p: Path(str(p)).exists())
+    if missing.any():
+        print(f"[list_figures_manifest] WARNING: {int(missing.sum())} manifest "
+              f"paths missing on disk — excluded.")
+        df = df[~missing].reset_index(drop=True)
+
+    if dedupe_architectures:
+        roots = resolve_duplicate_roots(cfg)
+        is_root = df["patent_id"].map(lambda p: roots.get(p, p) == p)
+        n_dropped_patents = df.loc[~is_root, "patent_id"].nunique()
+        if preview and n_dropped_patents:
+            print(f"[list_figures_manifest] dedupe_architectures: dropped "
+                  f"{int((~is_root).sum())} figure(s) belonging to "
+                  f"{n_dropped_patents} duplicate patent(s) (kept each "
+                  f"chain's original)")
+        df = df[is_root].reset_index(drop=True)
+
+    if preview:
+        print(f"[list_figures_manifest] {len(files)} manifest(s), scope={scope}: "
+              f"{len(df)} figures across {df['patent_id'].nunique()} patents "
+              f"({int(df['is_main'].sum())} mains)")
     return df
 
 
