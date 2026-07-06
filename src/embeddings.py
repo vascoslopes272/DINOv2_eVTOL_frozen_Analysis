@@ -195,6 +195,47 @@ def compute_embeddings(
     return {"metadata": metadata, "info": info, "arrays": arrays}
 
 
+def compute_embeddings_multi_gpu(
+    figures: pd.DataFrame,
+    cfg: Dict[str, Any],
+    devices: List[str],
+) -> Dict[str, Any]:
+    """Split ``figures`` across multiple GPUs and run compute_embeddings in
+    parallel, one model instance per device (not torch.nn.DataParallel —
+    that requires gathering HF's dict-like ModelOutput across devices, which
+    is fragile across transformers versions; a full model easily fits on
+    each GPU at this scale, so a plain shard-and-merge is simpler and safer).
+
+    Row order in the returned arrays/metadata matches the input ``figures``
+    order exactly, regardless of how the shards were split or finished.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    if len(devices) == 1:
+        return compute_embeddings(figures, cfg)
+
+    n = len(figures)
+    shard_bounds = np.array_split(np.arange(n), len(devices))
+    shards = [figures.iloc[idx].reset_index(drop=True) for idx in shard_bounds]
+
+    def _run(device: str, shard: pd.DataFrame) -> Dict[str, Any]:
+        shard_cfg = {**cfg, "analysis": {**cfg["analysis"], "device": device}}
+        model, processor, info = load_model(shard_cfg)
+        return compute_embeddings(shard, shard_cfg, model=model, processor=processor, info=info)
+
+    print(f"[compute_embeddings_multi_gpu] splitting {n} figures across {devices}: "
+          f"{[len(s) for s in shards]}")
+    with ThreadPoolExecutor(max_workers=len(devices)) as pool:
+        results = list(pool.map(lambda args: _run(*args), zip(devices, shards)))
+
+    metadata = pd.concat([r["metadata"] for r in results], ignore_index=True)
+    arrays = {
+        key: np.concatenate([r["arrays"][key] for r in results], axis=0)
+        for key in results[0]["arrays"]
+    }
+    return {"metadata": metadata, "info": results[0]["info"], "arrays": arrays}
+
+
 def save_embeddings(result: Dict[str, Any], cfg: Dict[str, Any]) -> Path:
     """Persist per-figure embeddings + metadata under ``<output_dir>/embeddings/``.
 

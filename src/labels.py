@@ -37,17 +37,49 @@ DROP_FIELD_RE = re.compile(
 # ── basic loading / inspection ────────────────────────────────────────────────
 
 def load_long(cfg: Dict[str, Any]) -> pd.DataFrame:
-    """Load the wizard long-format xlsx (path from ``taxonomy.wizard_excel``)."""
-    path = Path(cfg["taxonomy"]["wizard_excel"])
-    if not path.exists():
-        raise FileNotFoundError(f"wizard export not found: {path}")
-    df = pd.read_excel(path)
+    """Load and pool every 02a-postprocessed export matching
+    ``taxonomy.wizard_excel_glob`` (falls back to the single legacy
+    ``taxonomy.wizard_excel`` path if the glob key isn't set, so older configs
+    don't break). Using 02a's output (not the raw wizard export) means Rule
+    A-G corrections, duplicate inheritance and the disapproved/exact-duplicate
+    row scoping are already applied — the same source notebook 10 uses.
+    """
+    import glob as _glob
+
+    pattern = cfg["taxonomy"].get("wizard_excel_glob")
+    if pattern:
+        files = sorted(_glob.glob(str(pattern)))
+        if not files:
+            raise FileNotFoundError(f"no wizard export matches {pattern}")
+    else:
+        path = Path(cfg["taxonomy"]["wizard_excel"])
+        if not path.exists():
+            raise FileNotFoundError(f"wizard export not found: {path}")
+        files = [str(path)]
+
+    frames = []
+    for f in files:
+        df = pd.read_excel(f, sheet_name="Review")
+        df["_source_file"] = Path(f).name
+        frames.append(df)
+    long = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
     expected = {"Patent_ID", "Section", "Sub_Dimension", "Field", "Value"}
-    missing = expected - set(df.columns)
+    missing = expected - set(long.columns)
     if missing:
         raise ValueError(f"wizard export missing columns: {sorted(missing)}")
-    df["_source_file"] = path.name
-    return df
+
+    dup_ids = long.groupby("_source_file")["Patent_ID"].apply(set)
+    for i, fi in enumerate(dup_ids.index):
+        for fj in dup_ids.index[i + 1:]:
+            overlap = dup_ids[fi] & dup_ids[fj]
+            if overlap:
+                print(f"[load_long] WARNING: {len(overlap)} Patent_ID(s) appear in "
+                      f"both {fi} and {fj} — check for cross-batch duplication: "
+                      f"{sorted(overlap)[:5]}{'...' if len(overlap) > 5 else ''}")
+
+    print(f"[load_long] pooled {len(files)} file(s): {[Path(f).name for f in files]}")
+    return long
 
 
 def inspect_exports(cfg: Dict[str, Any]) -> pd.DataFrame:
@@ -262,7 +294,10 @@ def build_canonical(cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.DataFrame]:
     mains = apply_processing_manifest(mains, cfg)
     canon = wide.merge(mains, on=["base_patent_id", "arch_index"], how="left")
 
-    canon["label_source_file"] = long["_source_file"].iloc[0]
+    # Per-architecture provenance (was a single global value from the first
+    # row, silently wrong once load_long pools multiple batch files).
+    source_by_pid = long.drop_duplicates("Patent_ID").set_index("Patent_ID")["_source_file"]
+    canon["label_source_file"] = canon["Patent_ID"].map(source_by_pid)
     canon["ingest_date"] = datetime.date.today().isoformat()
 
     n_img = int(canon["image_path"].notna().sum())
