@@ -10,7 +10,9 @@ fields ``isMain`` / ``arch`` / ``status`` are how we pick the canonical "main"
 figure of each architecture.
 
 Everything here is read-only w.r.t. the raw xlsx (raw inputs are immutable);
-outputs go under ``taxonomy.output_dir``.
+outputs go under ``taxonomy.output_dir``. This module only pivots the wizard's
+edit-log shape into an analysis-ready table (``build_canonical``) — label-only
+QC/coverage on top of that table lives in :mod:`src.label_analysis`.
 """
 
 from __future__ import annotations
@@ -20,7 +22,6 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 ARCH_SUFFIX_RE = re.compile(r"^(?P<base>.+?)_arch(?P<n>\d+)$")
@@ -42,7 +43,7 @@ def load_long(cfg: Dict[str, Any]) -> pd.DataFrame:
     ``taxonomy.wizard_excel`` path if the glob key isn't set, so older configs
     don't break). Using 02a's output (not the raw wizard export) means Rule
     A-G corrections, duplicate inheritance and the disapproved/exact-duplicate
-    row scoping are already applied — the same source notebook 10 uses.
+    row scoping are already applied — the same source notebook 10a uses.
     """
     import glob as _glob
 
@@ -306,58 +307,6 @@ def build_canonical(cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.DataFrame]:
           f"{int(canon['multi_arch'].sum())} rows in multi-arch patents); "
           f"{n_img} have an approved main image.")
     return canon, images
-
-
-# ── coverage / QC ─────────────────────────────────────────────────────────────
-
-def attribute_columns(canon: pd.DataFrame) -> List[str]:
-    """Wide attribute columns (Section_Field pattern), excluding bookkeeping."""
-    non_attr = {"Patent_ID", "base_patent_id", "arch_index", "n_architectures",
-                "multi_arch", "assignee", "assignee_country", "priority_year",
-                "year_bin", "cpc_first", "cpc_subclass", "any_uncertain",
-                "image_path", "figure_id", "figure_type", "path", "patent_id",
-                "perspective", "acSty", "acCol", "bgSty", "bgCol", "parts",
-                "acState", "qualityFlag",
-                "label_source_file", "ingest_date", "Publication/Issue Date"}
-    return [c for c in canon.columns if c not in non_attr]
-
-
-def coverage_table(canon: pd.DataFrame, cfg: Dict[str, Any],
-                   only_with_image: bool = True) -> pd.DataFrame:
-    """attribute x class -> count, flagging classes below min_class_count."""
-    min_n = int(cfg["taxonomy"].get("min_class_count", 15))
-    df = canon[canon["image_path"].notna()] if only_with_image else canon
-    rows = []
-    for col in attribute_columns(canon):
-        vc = df[col].dropna().value_counts()
-        for val, n in vc.items():
-            rows.append({"attribute": col, "class": str(val), "n": int(n),
-                         "null_pct": round(100 * df[col].isna().mean(), 1),
-                         "below_min": bool(n < min_n)})
-    return pd.DataFrame(rows).sort_values(["attribute", "n"],
-                                          ascending=[True, False])
-
-
-def validate_canonical(canon: pd.DataFrame) -> pd.DataFrame:
-    """QC issue list: duplicate arch keys, missing images, missing metadata."""
-    issues = []
-    dup = canon.duplicated(["base_patent_id", "arch_index"])
-    if dup.any():
-        issues.append({"issue": "duplicate (base_patent_id, arch_index)",
-                       "n": int(dup.sum()),
-                       "detail": ", ".join(canon.loc[dup, "Patent_ID"].head(10))})
-    no_img = canon["image_path"].isna()
-    if no_img.any():
-        issues.append({"issue": "architecture without approved main image",
-                       "n": int(no_img.sum()),
-                       "detail": ", ".join(canon.loc[no_img, "Patent_ID"].head(10))})
-    no_meta = canon["assignee"].isna()
-    if no_meta.any():
-        issues.append({"issue": "no PatSeer metadata match",
-                       "n": int(no_meta.sum()),
-                       "detail": ", ".join(canon.loc[no_meta, "base_patent_id"]
-                                           .drop_duplicates().head(10))})
-    return pd.DataFrame(issues, columns=["issue", "n", "detail"])
 
 
 def save_canonical(canon: pd.DataFrame, cfg: Dict[str, Any]) -> Path:
