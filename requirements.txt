@@ -9,3 +9,4 @@ matplotlib
 tqdm
 pyyaml
 python-dotenv
+segment-anything  # for sam_test diagnostic; checkpoint downloaded separately, not via pip

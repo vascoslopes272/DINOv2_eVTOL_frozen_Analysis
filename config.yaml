@@ -66,29 +66,36 @@ analysis:
     method: "mean"          # swappable later: mean | canonical | per_figure_type
   seed: 42
 
-# ── Taxonomy structure-separation study (notebook 11_taxonomy_*) ─────────────
+# ── Label export/analysis (notebooks 10a_label_export, 10b_label_analysis) ───
+# NOTE: this repo only pivots + audits labels. The reference_matrix, UMAP,
+# clustering, and confound-analysis keys that used to live in this block moved
+# to eVTOL-Embedding-Evaluation/config.yaml (repo 3) alongside the joint code
+# that consumes them (src/probes.py, src/structure_clustering.py).
 taxonomy:
-  # Pools every 02a-postprocessed export (same files/glob as notebook 10's
-  # paths.reviewed_xlsx_glob) — NOT the raw wizard export: 02a's output
-  # already has Rule A-G corrections, duplicate inheritance and disapproved/
-  # exact-duplicate row scoping applied. Add new batches by re-running 02a;
-  # no config change needed here (glob picks them up automatically).
+  # Pools every 02a-postprocessed export (same files/glob as paths.reviewed_xlsx_glob
+  # above) — NOT the raw wizard export: 02a's output already has Rule A-G
+  # corrections, duplicate inheritance and disapproved/exact-duplicate row
+  # scoping applied. Add new batches by re-running 02a; no config change
+  # needed here (glob picks them up automatically).
   wizard_excel_glob: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1639_DS/data/reviewed xlsxs/Review_postprocess_*.xlsx"
   metadata_excel: "/mnt/storage_11tb/Drive_files_to_syncronize/2 - Patente & Validation/3 -Raw_Patent_Exports_PatSeer_&Gold_Standard/1639__dataset_08_06_26.xlsx"
   output_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/4 - Intelligence Models & Post Process Outputs/Preliminary_analysis/outputs/analysis_taxonomy"
   main_arch_only: false       # embed every labelled architecture per patent, not just arch 1
   min_class_count: 15         # classes below this are flagged in the coverage table
   year_bins: 3
-  n_folds: 5
-  reference_matrix: [22, mean_patch]   # matrix used for UMAP / clustering
-  umap_color_attrs:           # attributes colored in the Stage-2 UMAP grid
-    - G1_topType
-    - M2_wCount
-    - M2_wingConf
-    - M1_boomsPresent
-    - M1_fusShape
-    - M1_gearArch
-  confound_cols: [assignee, assignee_country, year_bin, perspective,
-                  acSty, acCol, bgSty, parts, qualityFlag]
-  external_cols: [cpc_subclass, cpc_first]   # CPC = patent-office classification
   exclude_uncertain: false    # true -> drop architectures flagged humanUncertain
+
+# ── SAM zero-shot diagnostic (notebooks/diagnostics/sam_mask_test.ipynb) ─────
+# NOT a pipeline stage: no training/fine-tuning, no embeddings output. Cheap
+# check of whether SAM's automatic mask generator produces clean, usable
+# part-level masks (rotors/wings/booms/fuselage) on our patent figures before
+# investing in a SAM-crops+SigLIP pipeline (12x). Read-only against
+# sample_dir; never touches the labelling pipeline or other notebooks' state.
+sam_test:
+  model_type: "vit_h"        # vit_b (375MB, fastest) | vit_l | vit_h (2.4GB, best masks)
+  checkpoint_path: "/mnt/storage_11tb/Drive_files_to_syncronize/4 - Intelligence Models & Post Process Outputs/model_checkpoints/sam_vit_h_4b8939.pth"  # EDIT-ME: download from Meta's SAM repo, not fetched by this repo
+  sample_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1639_DS/processed/Batch_05/main"
+  output_dir: "outputs/sam_test"   # local, git-ignored (see outputs/** in .gitignore)
+  n_samples: 18               # random subset drawn from sample_dir
+  device: "cuda:0"             # explicit — both cuda:0/cuda:1 free right now
+  seed: 42
