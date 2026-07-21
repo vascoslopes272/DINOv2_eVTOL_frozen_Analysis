@@ -26,6 +26,13 @@ paths:
   # so this points at a NEW folder for the 1639_DS 518px set (the old 1627_DS
   # 224px run stays untouched in .../outputs/analysis).
   output_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/4 - Intelligence Models & Post Process Outputs/Preliminary_analysis/outputs/analysis_1639_518"
+  # Parent dir holding one subfolder per extraction pipeline (emb_*.npy +
+  # metadata.parquet + manifest.json), consumed by eVTOL-Embedding-Evaluation's
+  # (repo 3) registry.py. Must be the SAME physical folder as repo 3's
+  # paths.embeddings_root. Only contrastive_finetune (notebook 12b) writes
+  # here today — Stage 0's own frozen-baseline save (embeddings.save_embeddings)
+  # does not yet follow this per-pipeline layout (known follow-up).
+  embeddings_root: "EDIT-ME"
 
 data:
   patent_id_col: "Record Number"          # column in the Excel holding the patent id
@@ -84,6 +91,32 @@ taxonomy:
   min_class_count: 15         # classes below this are flagged in the coverage table
   year_bins: 3
   exclude_uncertain: false    # true -> drop architectures flagged humanUncertain
+
+# ── Contrastive fine-tuning (notebook 12b_contrastive_finetune) ──────────────
+# Unfreezes only the last few transformer blocks of analysis.model (frozen
+# everywhere else) and trains with supervised NT-Xent (SimCLR-style):
+# positive pairs are two architectures' main figures sharing the SAME
+# class_col value (from labels_v1.parquet / label_export.build_canonical)
+# but a DIFFERENT style — the style_cols values (acSty/bgSty, also from
+# build_canonical's per-architecture main-image row) must differ between the
+# two figures. Goal: pull same-class-different-style pairs together so the
+# embedding space stops separating by drawing style. Trains on the CLS token
+# of the model's final transformer block (L2-normalized), matching
+# embeddings.py's cls pooling at layer = num_hidden_layers.
+contrastive_finetune:
+  class_col: "G1_topType"          # architecture-class label defining positives
+  style_cols: ["acSty"]            # must differ between the two figures of a pair; add "bgSty" to widen what counts as "different style"
+  min_class_count: 2               # classes with fewer than this many style-spanning main-image figures are dropped from pair sampling
+  learning_rate: 1.0e-5
+  batch_size: 32                   # positive PAIRS per training batch (64 images/forward pass)
+  temperature: 0.07                # NT-Xent softmax temperature
+  num_epochs: 20
+  unfreeze_last_n_blocks: 4        # last N of analysis.model's transformer blocks (+ final layernorm) made trainable; everything else stays frozen
+  output_dir: "EDIT-ME"            # ABSOLUTE path (not under paths:, so config_loader does not resolve it) — checkpoints/ and logs/ subfolders created here, e.g. .../Preliminary_analysis/outputs/contrastive_ft_1639
+  checkpoint_every_n_epochs: 1
+  device: "cuda:0"                 # cuda:0 or cuda:1 — set per-run, never hardcoded in code
+  output_pipeline_name: "dinov2_contrastive_ft"  # subfolder written under paths.embeddings_root once training finishes, in repo 3's registry.py format
+  seed: 42
 
 # ── SAM zero-shot diagnostic (notebooks/diagnostics/sam_mask_test.ipynb) ─────
 # NOT a pipeline stage: no training/fine-tuning, no embeddings output. Cheap
