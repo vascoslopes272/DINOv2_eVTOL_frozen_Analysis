@@ -119,6 +119,10 @@ def _l2_normalize(x: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
     return x / x.norm(dim=-1, keepdim=True).clamp_min(eps)
 
 
+# Row identity carried from the figures table into metadata.parquet (whichever exist).
+META_COLS = ["figure_uid", "aircraft_uid", "patent_id", "figure_id", "figure_type"]
+
+
 @torch.no_grad()
 def compute_embeddings(
     figures: pd.DataFrame,
@@ -181,14 +185,8 @@ def compute_embeddings(
                 vec = _l2_normalize(vec).float().cpu().numpy()
                 acc[(L, pool)].append(vec)
 
-        for _, r in batch_rows.iterrows():
-            meta_rows.append(
-                {
-                    "figure_id": r["figure_id"],
-                    "patent_id": r["patent_id"],
-                    "figure_type": r["figure_type"],
-                }
-            )
+        meta_rows.extend(batch_rows[[c for c in META_COLS if c in batch_rows.columns]]
+                         .to_dict("records"))
 
     arrays = {key: np.concatenate(chunks, axis=0) for key, chunks in acc.items()}
     metadata = pd.DataFrame(meta_rows)
@@ -236,7 +234,8 @@ def compute_embeddings_multi_gpu(
     return {"metadata": metadata, "info": results[0]["info"], "arrays": arrays}
 
 
-def save_embeddings(result: Dict[str, Any], cfg: Dict[str, Any]) -> Path:
+def save_embeddings(result: Dict[str, Any], cfg: Dict[str, Any],
+                    out_dir: Path | None = None) -> Path:
     """Persist per-figure embeddings + metadata under ``<output_dir>/embeddings/``.
 
     Writes one ``emb_layer{L}_{pooling}.npy`` per (layer, pooling), a
@@ -245,7 +244,7 @@ def save_embeddings(result: Dict[str, Any], cfg: Dict[str, Any]) -> Path:
     """
     import json
 
-    out_dir = Path(cfg["paths"]["output_dir"]) / "embeddings"
+    out_dir = Path(out_dir) if out_dir is not None else Path(cfg["paths"]["output_dir"]) / "embeddings"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for (L, pool), arr in result["arrays"].items():
@@ -259,11 +258,11 @@ def save_embeddings(result: Dict[str, Any], cfg: Dict[str, Any]) -> Path:
     return out_dir
 
 
-def load_embeddings(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def load_embeddings(cfg: Dict[str, Any], out_dir: Path | None = None) -> Dict[str, Any]:
     """Reload what :func:`save_embeddings` wrote. Returns the same dict shape."""
     import json
 
-    out_dir = Path(cfg["paths"]["output_dir"]) / "embeddings"
+    out_dir = Path(out_dir) if out_dir is not None else Path(cfg["paths"]["output_dir"]) / "embeddings"
     metadata = pd.read_parquet(out_dir / "metadata.parquet")
     with open(out_dir / "model_info.json", "r", encoding="utf-8") as fh:
         info = ModelInfo(**json.load(fh))
@@ -433,3 +432,60 @@ def qc_pass_fail(report: pd.DataFrame) -> bool:
         and (report["inf_count"] == 0).all()
         and (report["all_zero_count"] == 0).all()
     )
+
+
+# -----------------------------------------------------------------------------
+# Pipeline run (notebook 22_embedding_extraction)
+# -----------------------------------------------------------------------------
+def run_extraction(cfg: Dict[str, Any], size: int, force: bool = False) -> Path:
+    """Embed every processed figure of one size into ``embeddings/<tag>/``.
+
+    Input: ``processed/<size>/manifest.csv`` (notebook 21). The processor input
+    size is set to ``size`` so the square images are used as they are (no
+    extra resize or crop). Skips the run when the saved figure set already
+    matches, unless ``force``. Writes ``manifest.json`` recording the model,
+    size, selection summary and git commit.
+    """
+    import json
+    import subprocess
+    from datetime import datetime
+
+    root = Path(cfg["paths"]["pipeline_root"])
+    tag = cfg["extraction"]["tag"].format(size=size)
+    out_dir = root / "embeddings" / tag
+    figures = pd.read_csv(root / "processed" / str(size) / "manifest.csv")
+
+    if not force and (out_dir / "metadata.parquet").exists():
+        saved = set(pd.read_parquet(out_dir / "metadata.parquet")["figure_uid"])
+        if saved == set(figures["figure_uid"]):
+            print(f"[extraction] {tag}: up to date ({len(saved)} figures) — skipped")
+            return out_dir
+        print(f"[extraction] {tag}: figure set changed — recomputing")
+
+    run_cfg = {**cfg, "analysis": {**cfg["analysis"], "input_size": int(size)}}
+    devices = run_cfg["analysis"].get("devices") or [run_cfg["analysis"]["device"]]
+    result = compute_embeddings_multi_gpu(figures, run_cfg, devices)
+    save_embeddings(result, run_cfg, out_dir)
+
+    try:
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+                                cwd=cfg["folder_root"]).stdout.strip()
+    except OSError:
+        commit = ""
+    sel = root / "selection" / "selection_summary.json"
+    manifest = {
+        "pipeline": tag,
+        "created": datetime.now().isoformat(timespec="seconds"),
+        "git_commit": commit,
+        "model": asdict(result["info"]),
+        "input_size": int(size),
+        "layers": list(run_cfg["analysis"]["layers"]),
+        "pooling": list(run_cfg["analysis"]["pooling"]),
+        "variants": [f"layer{L}_{p}" for L, p in sorted(result["arrays"])],
+        "n_figures": int(len(figures)),
+        "processed_manifest": str(root / "processed" / str(size) / "manifest.csv"),
+        "selection_summary": json.loads(sel.read_text()) if sel.exists() else None,
+    }
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str),
+                                           encoding="utf-8")
+    return out_dir

@@ -10,45 +10,49 @@ this repo's outputs.
 
 ## Scope
 
-- **Labels** (`10a`/`10b`): pivot the labelling wizard's long-format export
-  into an analysis-ready table (`labels_v1.parquet`), and audit it — batch
-  reconciliation, coverage, QC issues. Label-only, no embeddings.
-- **Augmentation** (`11`): dataset-variant generation (option A: writes new
-  image sets to disk; each extraction notebook picks raw or an augmented
-  variant via config).
-- **Extraction** (`12a`, `12b`, ...): one notebook per vision pipeline. Loads
-  a model, computes per-figure embeddings, runs QC (NaN/Inf/dead-vector
-  checks, cosine-similarity sanity, layer/pooling selection where
-  applicable), and saves in the standardized format below.
+Stage 2 of the pipeline (stage 0 is labelling in `Patent-Labelling-Tools`,
+stage 1 and stage 3 are in `eVTOL-Visual-Evaluation`). `notebooks/` holds
+exactly three notebooks, run in order:
+
+| Notebook | What it does | Writes (under `paths.pipeline_root`) |
+|---|---|---|
+| `20_figure_selection` | **Chooses the figures from the labels only**, without opening any image. It applies fixed gates (approved, domain gate, D1/D2 duplicates, whole-aircraft only), records the selection funnel, and builds one named figure set per strategy (main, all, hover, cruise, per-perspective, line-only, …). It also writes a coverage matrix and a select/report split of the aircraft. | `selection/` |
+| `21_image_processing` | Rotates the selected raw crops (`1639_LABELLED/joined/approved_images`) by `rotation_deg`, resizes them with the aspect ratio kept, and pads them to a square, once per size (224, 518). | `processed/<size>/` |
+| `22_embedding_extraction` | Embeds the **union** of all sets once for each size, with frozen DINOv2 (every layer × pooling). A set is just a subset of these rows. | `embeddings/<tag>/` |
+
+The embeddings are evaluated by
+`eVTOL-Visual-Evaluation/embedding_evaluation/notebooks/30_embedding_evaluation.ipynb`
+(metrics, figures, report). The reasons behind each selection rule are in
+`eVTOL-Visual-Evaluation/docs/embedding_evaluation/SELECTION_DECISIONS.md`.
 
 ## Layout
 
 ```
 eVTOL-Embedding-Extraction/
-  README.md
-  .gitignore
-  requirements.txt
-  config.yaml                      # self-contained config (fill in EDIT-ME paths)
+  README.md  requirements.txt  .gitignore
+  config.yaml                      # paths + selection / processing / extraction blocks
   src/
-    __init__.py
     config_loader.py               # find + load config.yaml, resolve paths
-    data.py                        # figure discovery (Stage-02 manifests)
-    label_export.py                # wizard long-format -> wide canonical label table
-    label_analysis.py              # label-only QC / coverage / batch reconciliation
-    augmentation.py                # dataset-variant generation
-    embeddings.py                  # frozen DINOv2 extraction + per-figure storage + QC
+    figure_selection.py            # notebook 20: candidates, gates, figure sets, coverage, split
+    image_processing.py            # notebook 21: rotate, resize, pad
+    embeddings.py                  # notebook 22: frozen DINOv2 extraction (+ run_extraction)
+    data.py  label_export.py  label_analysis.py   # legacy (archived notebooks)
+    contrastive_finetune.py  sam_test.py          # legacy / diagnostics
   notebooks/
-    10a_label_export.ipynb         # thin: build_canonical -> labels_v1.parquet
-    10b_label_analysis.ipynb       # thin: coverage/QC/batch-reconciliation report
-    11_augmentation.ipynb          # thin: dataset-variant generation
-    12a_extract_dinov2_frozen.ipynb   # thin: extract + QC for one pipeline
-    Archive/                       # superseded notebook snapshots
-  docs/
-    10b_label_analysis_report.md   # label-only batch/duplicate/coverage report
-    12a_qc_report.md                # embedding QC + layer/pooling selection report
-    figs/                          # QC figures (cosine-similarity histograms)
-  outputs/
-    embeddings/<pipeline_name>/    # emb_<variant>.npy + metadata.parquet + manifest.json
+    20_figure_selection.ipynb
+    21_image_processing.ipynb
+    22_embedding_extraction.ipynb
+  archive/notebooks/               # superseded notebooks (10a/10b/01 labels, 12a, old 10/11, SAM test)
+  docs/                            # older hand-written reports (superseded)
+```
+
+On disk (`paths.pipeline_root`):
+
+```
+selection/   candidates.csv  funnel.csv  aircraft.parquet  coverage.csv
+             sets/<name>.csv  sets_union.csv  selection_summary.json
+processed/<size>/<batch>/<patent>/*.png   + manifest.csv
+embeddings/<tag>/   emb_layer{L}_{pooling}.npy  metadata.parquet  model_info.json  manifest.json
 ```
 
 ## Setup
@@ -74,28 +78,23 @@ adjust the regex) before trusting the mapping.
 
 ## Run
 
-1. `notebooks/10a_label_export.ipynb` — pivots the wizard's reviewed export
-   into `labels_v1.parquet` + a column dictionary.
-2. `notebooks/10b_label_analysis.ipynb` — label-only coverage/QC/batch report.
-3. `notebooks/11_augmentation.ipynb` — (optional) generate augmented dataset
-   variants.
-4. `notebooks/12a_extract_dinov2_frozen.ipynb` (and future `12b`, `12c`, ...)
-   — discover figures, compute embeddings, run QC, save under
-   `outputs/embeddings/<pipeline_name>/`.
+1. `notebooks/20_figure_selection.ipynb`: rules come from `selection:` in `config.yaml`.
+2. `notebooks/21_image_processing.ipynb`: settings come from `processing:`.
+3. `notebooks/22_embedding_extraction.ipynb`: needs the GPU; settings come from `extraction:` and `analysis:`.
+4. In `eVTOL-Visual-Evaluation`, run `embedding_evaluation/notebooks/30_embedding_evaluation.ipynb`.
 
-## Embedding output format (standardized across pipelines)
+After changing the selection rules, re-run 20 → 21 → 22. Notebooks 21 and 22 skip work that is already done.
+
+## Embedding output format
 
 ```
-outputs/embeddings/<pipeline_name>/
-  emb_<variant>.npy      # one per (layer,pooling) or just one for pipelines
-                          # without that axis, row-aligned across figures
-  metadata.parquet       # figure_id, patent_id, arch_index, image_path
-  manifest.json          # pipeline name, model checkpoint/version,
-                          # extraction config, date, git commit
+<pipeline_root>/embeddings/<tag>/          # tag = extraction.tag, e.g. dinov2-large_518
+  emb_layer{L}_{pooling}.npy   # L2-normalised, row-aligned with metadata
+  metadata.parquet             # figure_uid, aircraft_uid, patent_id
+  model_info.json              # detected architecture facts
+  manifest.json                # model, input size, layers/pooling, git commit,
+                               # the selection summary the figures came from
 ```
-
-`eVTOL-Embedding-Evaluation`'s `registry.py` reads `manifest.json` to resolve
-a pipeline name to this folder — no special-casing per pipeline.
 
 ## Notes
 

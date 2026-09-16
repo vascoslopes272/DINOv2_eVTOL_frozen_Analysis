@@ -8,6 +8,14 @@
 # =============================================================================
 
 paths:
+  # ── Pipeline 20–22 (figure selection -> image processing -> extraction) ──
+  # Stage 04's work tree (Patent-Labelling-Tools): joined/master_labels.xlsx,
+  # joined/master_figures.xlsx, joined/approved_images/ — the only label input.
+  labelled_root: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1639_LABELLED"
+  # Everything notebooks 20–22 write: selection/, processed/<size>/,
+  # embeddings/<tag>/. eVTOL-Visual-Evaluation (30_embedding_evaluation) reads it.
+  pipeline_root: "/mnt/storage_11tb/Drive_files_to_syncronize/4 - Intelligence Models & Post Process Outputs/Preliminary_analysis/outputs/embedding_pipeline"
+  # ── Legacy (pre-2026-09-16 notebooks, now in archive/notebooks) ─────────────
   image_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1627_DS/Shrouded vs Openrotor/Images Processed"        # LEGACY 1627_DS set (data.list_figures filename parsing)
   # Stage-02 manifests from Patent-Labelling-Tools (processor.process_batch) —
   # one CSV per batch mapping wizard Image_Path -> processed 518x518 PNG plus
@@ -73,7 +81,7 @@ analysis:
     method: "mean"          # swappable later: mean | canonical | per_figure_type
   seed: 42
 
-# ── Label export/analysis (notebooks 10a_label_export, 10b_label_analysis) ───
+# ── Label export/analysis (archived notebook 01_label_preprocessing; src/label_export.py) ───
 # NOTE: this repo only pivots + audits labels. The reference_matrix, UMAP,
 # clustering, and confound-analysis keys that used to live in this block moved
 # to eVTOL-Embedding-Evaluation/config.yaml (repo 3) alongside the joint code
@@ -91,6 +99,50 @@ taxonomy:
   min_class_count: 15         # classes below this are flagged in the coverage table
   year_bins: 3
   exclude_uncertain: false    # true -> drop architectures flagged humanUncertain
+
+# ── 20 figure selection (label-driven "pre-pre-processing") ────────────────
+# Rationale for every rule: eVTOL-Visual-Evaluation/docs/embedding_evaluation/SELECTION_DECISIONS.md
+selection:
+  # Gates, applied to every figure set, in this order (see funnel.csv):
+  gate_tags: [UAVSimilar, ElectricSimilar, STOLSimilar]   # domain gate, ruling 2026-09-15 (same as labeling_evaluation)
+  exclude_dup_types: []          # D1/D2 are always out (labels inherited); add 3 to also drop D3 variants
+  exclude_uncertain: false       # true -> drop aircraft the labeller flagged human-uncertain
+  whole_vehicle_only: true       # refinement 3: only "Whole Vehicle Layout" figures
+  exclude_quality: []            # e.g. [poor_quality, generic]
+  exclude_styles: []             # e.g. [Render, Draft] — acSty values
+  # When a strategy has several candidate figures for one aircraft: main image
+  # first, then this perspective order, then quality "clean", then figure order.
+  tie_break_perspective: [Front-Isometric, Rear-Isometric, Side, Front, Top, Back, Bottom/Down]
+  seed: 42                       # select/report split of the aircraft (stratified by topType)
+  # Figure sets (one per strategy). rule: all | main | state | perspective | style | state_by_type
+  strategies:
+    main:          {rule: main}
+    all:           {rule: all}
+    hover:         {rule: state, values: [Hover]}
+    cruise:        {rule: state, values: [Cruise]}
+    hovercruise:   {rule: state, values: [HoverCruise]}
+    per_front_iso: {rule: perspective, values: [Front-Isometric]}
+    per_side:      {rule: perspective, values: [Side]}
+    per_top:       {rule: perspective, values: [Top]}
+    line_only:     {rule: style, values: [Line Drawing]}
+    # TO DECIDE (user, pending investigation): the flight state that best shows
+    # each topType's defining feature. Empty lists -> the set is skipped.
+    state_by_type:
+      rule: state_by_type
+      table: {TW: [], TR: [], CVT: [], TB: [], SLC: [], MR: [], PTC: [], HB: [], RC: [], PFV: [], SRW: [], DS: []}
+
+# ── 21 image processing ─────────────────────────────────────────────────────
+processing:
+  sizes: [224, 518]              # one processed/<size>/ folder each; 518 = DINOv2/14 hi-res, 224 = default
+  pad_fill: white                # white | border (median border colour)
+  sharpen: 1.0                   # >1 sharpens before downscaling (Patent-Labelling-Tools used 1.2)
+
+# ── 22 embedding extraction ─────────────────────────────────────────────────
+# Uses analysis.model / layers / pooling / batch_size / devices above; the
+# processor input size is set to each processed size, so no extra resize/crop.
+extraction:
+  sizes: [224, 518]              # which processed/<size>/ folders to embed
+  tag: "dinov2-large_{size}"     # embeddings/<tag>/
 
 # ── Contrastive fine-tuning (notebook 12b_contrastive_finetune) ──────────────
 # Unfreezes only the last few transformer blocks of analysis.model (frozen
@@ -118,7 +170,7 @@ contrastive_finetune:
   output_pipeline_name: "dinov2_contrastive_ft"  # subfolder written under paths.embeddings_root once training finishes, in repo 3's registry.py format
   seed: 42
 
-# ── SAM zero-shot diagnostic (notebooks/diagnostics/sam_mask_test.ipynb) ─────
+# ── SAM zero-shot diagnostic (archive/notebooks/sam_mask_test.ipynb) ─────
 # NOT a pipeline stage: no training/fine-tuning, no embeddings output. Cheap
 # check of whether SAM's automatic mask generator produces clean, usable
 # part-level masks (rotors/wings/booms/fuselage) on our patent figures before
