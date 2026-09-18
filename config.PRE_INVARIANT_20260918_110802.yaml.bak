@@ -120,7 +120,7 @@ selection:
     all:           {rule: all}
     hover:         {rule: state, values: [Hover]}
     cruise:        {rule: state, values: [Cruise]}
-    invariant:     {rule: state, values: [Invariant]}   # the wizard's Invariant (stored id HoverCruise; 04 writes Invariant)
+    hovercruise:   {rule: state, values: [HoverCruise]}
     per_front_iso: {rule: perspective, values: [Front-Isometric]}
     per_side:      {rule: perspective, values: [Side]}
     per_top:       {rule: perspective, values: [Top]}

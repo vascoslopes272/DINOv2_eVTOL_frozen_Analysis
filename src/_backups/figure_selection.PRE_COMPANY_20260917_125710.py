@@ -41,7 +41,7 @@ WHOLE_VEHICLE = "Whole Vehicle Layout"
 FIGURE_COLS = ["aircraft_id", "batch", "patent_id", "block", "fig_key", "arch", "image_file", "approved_copy_path", "status",
                "is_main", "per", "acState", "acSty", "acCol", "bgSty", "parts",
                "qualityFlag", "rotation_deg", "comment"]
-AIRCRAFT_COLS = ["patent_id", "variant", "aircraft_name", "company", "assignee", "app_year", "topType",
+AIRCRAFT_COLS = ["patent_id", "variant", "aircraft_name", "assignee", "app_year", "topType",
                  "is_approved", "is_primary", "dup_type", "same_aircraft_as", "labels_inherited_from",
                  "t1_humanUncertain", "edgeTags", "arch_gt", "arch_gt_visible"]
 

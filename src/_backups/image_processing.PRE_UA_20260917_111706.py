@@ -1,9 +1,9 @@
 """Image pre-processing of the selected figures (notebook 21_image_processing).
 
 Input: ``selection/sets_union.csv`` (notebook 20) — every figure any set uses,
-read from Stage 04's raw copies (``approved_copy_path``,
-1639_LABELLED/0_labelling/outputs/images/<aircraft_id>/). Those copies are the
-wizard crops as drawn: not rotated, not square, any size.
+read from Stage 04's raw copies (``approved_copy_path``, 1639_LABELLED/joined/
+approved_images). Those copies are the wizard crops as drawn: not rotated, not
+square, any size.
 
 Per figure, per configured size:
     1. RGB, transparency composited over white
@@ -12,8 +12,7 @@ Per figure, per configured size:
     3. resize with aspect kept so the long side = size (LANCZOS)
     4. pad to size x size (``pad_fill``: white, or the median border colour)
 
-Output: ``<paths.pipeline_root>/processed/<size>/<aircraft_id>/<file>.png``
-(one folder per aircraft, ``aircraft_id = <patent>_ua<N>``, no batch level)
+Output: ``<paths.pipeline_root>/processed/<size>/<batch>/<patent>/<file>.png``
 and ``processed/<size>/manifest.csv`` (figure_uid -> path + original size).
 Existing files are skipped unless ``force``; the manifest is always rewritten.
 """
@@ -75,7 +74,7 @@ def process_all(figures: pd.DataFrame, cfg: Dict[str, Any], size: int,
     rows = []
     for r in tqdm(figures.itertuples(index=False), total=len(figures), desc=f"{size}px"):
         src = Path(r.approved_copy_path)
-        dst = out_root / str(r.aircraft_uid) / (Path(r.image_file).stem + ".png")
+        dst = out_root / r.batch / r.patent_id / (Path(r.image_file).stem + ".png")
         with Image.open(src) as im:
             orig_w, orig_h = im.size
         if force or not dst.exists():

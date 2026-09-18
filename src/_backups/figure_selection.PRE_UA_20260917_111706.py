@@ -3,9 +3,8 @@
 The "pre-pre-processing": decides WHICH figures enter the embedding pipeline
 using only the human labels — nothing here opens an image.
 
-Input: Stage 04's tables in ``<paths.labelled_root>/0_labelling/outputs/tables/``
-(``aircraft_table.csv``, one row per aircraft ``aircraft_id = <patent>_ua<N>``;
-``figure_table.csv``, one row per figure). Layout of 2026-09-17.
+Input: Stage 04's join in ``paths.labelled_root`` (``joined/master_labels.xlsx``,
+one row per aircraft variant; ``joined/master_figures.xlsx``, one row per figure).
 
 1. candidates   every figure on file, with its figure labels (per, acState,
                 acSty, parts, qualityFlag, is_main, rotation_deg) and its
@@ -38,12 +37,12 @@ import numpy as np
 import pandas as pd
 
 WHOLE_VEHICLE = "Whole Vehicle Layout"
-FIGURE_COLS = ["aircraft_id", "batch", "patent_id", "block", "fig_key", "arch", "image_file", "approved_copy_path", "status",
+FIGURE_COLS = ["batch", "patent_id", "block", "fig_key", "arch", "image_file", "approved_copy_path", "status",
                "is_main", "per", "acState", "acSty", "acCol", "bgSty", "parts",
                "qualityFlag", "rotation_deg", "comment"]
-AIRCRAFT_COLS = ["patent_id", "variant", "aircraft_name", "company", "assignee", "app_year", "topType",
-                 "is_approved", "is_primary", "dup_type", "same_aircraft_as", "labels_inherited_from",
-                 "t1_humanUncertain", "edgeTags", "arch_gt", "arch_gt_visible"]
+AIRCRAFT_COLS = ["patent_id", "variant", "aircraft_name", "assignee", "app_year", "topType",
+                 "is_approved", "is_primary", "dup_type", "labels_inherited_from",
+                 "t1_humanUncertain", "edgeTags"]
 
 
 def selection_dir(cfg: Dict[str, Any]) -> Path:
@@ -66,7 +65,7 @@ def load_master(cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.DataFrame]:
     figures = pd.read_csv(root / "figure_table.csv", keep_default_na=False, na_values=[""], low_memory=False)
     master["arch"] = pd.to_numeric(master["variant"], errors="coerce").astype("Int64")
     figures["arch"] = pd.to_numeric(figures["arch"], errors="coerce").astype("Int64")
-    master["aircraft_uid"] = master["aircraft_id"]          # <patent>_ua<N> — the one key from stage 0 to stage 3
+    master["aircraft_uid"] = master["patent_id"] + "#" + master["arch"].astype(str)
     return master, figures
 
 
@@ -76,9 +75,8 @@ def build_candidates(master: pd.DataFrame, figures: pd.DataFrame) -> pd.DataFram
     # The wizard block name is the only unique figure key: some rows carry no
     # file name, fig_key is empty on older batches, and one record
     # (CN114684361A) has two figure rows pointing at the same file.
-    # <aircraft_id>/<figure file> — the same path shape as 0_labelling/outputs/images/ and processed/<size>/
-    f["figure_uid"] = f["aircraft_id"] + "/" + f["block"].astype(str).str.replace(r"^Image:\s*", "", regex=True)
-    f = f.drop(columns=["aircraft_id"])
+    f["figure_uid"] = (f["batch"] + "/" + f["patent_id"] + "/"
+                       + f["block"].astype(str).str.replace(r"^Image:\s*", "", regex=True))
     a = master[AIRCRAFT_COLS + ["arch", "aircraft_uid"]].rename(columns={"variant": "variant_label"})
     c = f.merge(a, on=["patent_id", "arch"], how="left", validate="m:1")
     # patent-level verdict for figures that carry no arch (disapproved figures)
@@ -110,7 +108,7 @@ def apply_gates(c: pd.DataFrame, cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.
         ("no aircraft row", c["aircraft_uid"].isna()),
         ("aircraft not approved", ~_truthy(c["is_approved"])),
         *[(f"domain gate: {g}", similar == g) for g in gate_tags],
-        ("duplicate patent (D1/D2, points at its original)", ~_truthy(c["is_primary"])),
+        ("duplicate patent (D1/D2, labels inherited)", ~_truthy(c["is_primary"])),
         *[(f"duplicate type D{int(t)} excluded", dup_type == t)
           for t in s.get("exclude_dup_types", [])],
     ]
