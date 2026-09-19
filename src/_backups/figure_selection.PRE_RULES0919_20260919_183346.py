@@ -38,14 +38,6 @@ import numpy as np
 import pandas as pd
 
 WHOLE_VEHICLE = "Whole Vehicle Layout"
-#: the flight states of the codebook (T2 acState, R2-02; Both added 2026-09-19). Every state
-#: filter below is an allowlist, so a Both figure never enters the hover or cruise sets; a
-#: value outside this list is reported by :func:`state_check`, never dropped.
-KNOWN_STATES = ["Hover", "Transition", "Cruise", "Invariant", "Both", "Other"]
-#: the aircraft a G1 override leaves without a type (rule 1, 2026-09-19); formerly shown as "∅"
-UNCLASSIFIABLE = "unclassifiable (G1 override)"
-#: a blank type WITHOUT a G1 override (should not happen: notebook 04 checks it)
-BLANK_TYPE = "blank (no type recorded)"
 FIGURE_COLS = ["aircraft_id", "batch", "patent_id", "block", "fig_key", "arch", "image_file", "approved_copy_path", "status",
                "is_main", "per", "acState", "acSty", "acCol", "bgSty", "parts",
                "qualityFlag", "rotation_deg", "comment"]
@@ -168,20 +160,15 @@ def _one_per_aircraft(pool: pd.DataFrame, tie_break: List[str]) -> pd.DataFrame:
 
 
 def build_set(elig: pd.DataFrame, name: str, spec: Dict[str, Any],
-              tie_break: List[str], main_exclude_states: List[str] | None = None) -> pd.DataFrame | None:
-    """Figures of one strategy. ``None`` when the strategy is not configured yet.
-
-    ``main_exclude_states`` (the optional main-set state gate, off by default) keeps
-    figures in those flight states out of the ``main`` set only."""
+              tie_break: List[str]) -> pd.DataFrame | None:
+    """Figures of one strategy. ``None`` when the strategy is not configured yet."""
     rule = spec["rule"]
     if rule == "all":
         out = elig.copy()
     elif rule == "main":
-        pool = elig[~elig["acState"].isin(main_exclude_states)] if main_exclude_states else elig
-        out = _one_per_aircraft(pool, tie_break)
+        out = _one_per_aircraft(elig, tie_break)
     elif rule in ("state", "perspective", "style"):
         col = {"state": "acState", "perspective": "per", "style": "acSty"}[rule]
-        # allowlist: only the listed values enter (a Both figure never enters hover or cruise)
         out = _one_per_aircraft(elig[elig[col].isin(spec["values"])], tie_break)
     elif rule == "state_by_type":
         table = {k: v for k, v in (spec.get("table") or {}).items() if v}
@@ -199,38 +186,18 @@ def build_set(elig: pd.DataFrame, name: str, spec: Dict[str, Any],
     return out
 
 
-def main_gate_states(cfg: Dict[str, Any]) -> List[str]:
-    """The flight states the optional main-set gate removes: [] while the gate is off (default)."""
-    s = cfg["selection"]
-    return list(s.get("main_state_gate_states", ["Both", "Other"])) if s.get("main_state_gate", False) else []
-
-
 def build_sets(c: pd.DataFrame, cfg: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
     s = cfg["selection"]
     elig = c[c["eligible"]]
     sets = {}
     for name, spec in s["strategies"].items():
-        out = build_set(elig, name, spec, list(s.get("tie_break_perspective", [])), main_gate_states(cfg))
+        out = build_set(elig, name, spec, list(s.get("tie_break_perspective", [])))
         if out is not None:
             sets[name] = out
     return sets
 
 
 # ── 4. aircraft table, coverage, split ───────────────────────────────────────
-
-def type_group(frame: pd.DataFrame) -> pd.Series:
-    """topType, or ``unclassifiable (G1 override)`` for an aircraft a G1 override leaves
-    without a type (notebook 04's ``overrides``). Both labels sort after every type code,
-    exactly where "∅" sorted, so the seeded select/report split is unchanged."""
-    if "overrides" in frame.columns:
-        g1 = frame["overrides"].fillna("").astype(str).map(lambda v: "G1" in v.split("|"))
-    elif "g1_quickOverride" in frame.columns:
-        g1 = _truthy(frame["g1_quickOverride"])
-    else:
-        g1 = pd.Series(False, index=frame.index)
-    blank = pd.Series(np.where(g1, UNCLASSIFIABLE, BLANK_TYPE), index=frame.index)
-    return frame["topType"].where(frame["topType"].notna(), blank)
-
 
 def aircraft_table(master: pd.DataFrame, c: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """Every eligible aircraft with ALL its labels, plus the select/report split."""
@@ -240,8 +207,7 @@ def aircraft_table(master: pd.DataFrame, c: pd.DataFrame, cfg: Dict[str, Any]) -
 
     rng = np.random.default_rng(int(cfg["selection"].get("seed", 42)))
     a["split"] = ""
-    a["type_group"] = type_group(a)
-    for _, g in a.groupby(a["type_group"]):
+    for _, g in a.groupby(a["topType"].fillna("∅")):
         idx = rng.permutation(g.index.to_numpy())
         half = np.array(["select", "report"])[np.arange(len(idx)) % 2]
         a.loc[idx, "split"] = half
@@ -254,7 +220,6 @@ def aircraft_table(master: pd.DataFrame, c: pd.DataFrame, cfg: Dict[str, Any]) -
 
 def coverage(aircraft: pd.DataFrame, sets: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     cov = aircraft[["aircraft_uid", "topType", "split"]].copy()
-    cov["type_group"] = aircraft["type_group"] if "type_group" in aircraft.columns else type_group(aircraft)
     for name, df in sets.items():
         n = df.groupby("aircraft_uid").size()
         cov[name] = cov["aircraft_uid"].map(n).fillna(0).astype(int)
@@ -263,48 +228,11 @@ def coverage(aircraft: pd.DataFrame, sets: Dict[str, pd.DataFrame]) -> pd.DataFr
 
 def coverage_by_type(cov: pd.DataFrame, set_names: List[str]) -> pd.DataFrame:
     """Aircraft covered per set and topType (share of that type's aircraft)."""
-    g = cov.groupby(cov["type_group"] if "type_group" in cov.columns else cov["topType"].fillna(BLANK_TYPE))
+    g = cov.groupby(cov["topType"].fillna("∅"))
     out = pd.DataFrame({"aircraft": g.size()})
     for s in set_names:
         out[s] = g[s].apply(lambda x: int((x > 0).sum()))
     return out.sort_values("aircraft", ascending=False)
-
-
-def state_check(c: pd.DataFrame) -> pd.DataFrame:
-    """Eligible figures per flight state: every codebook state (zeros kept), then any value
-    outside :data:`KNOWN_STATES` under its own name, flagged ``known = False``."""
-    st = c.loc[c["eligible"], "acState"].fillna("(blank)").astype(str)
-    counts = st.value_counts()
-    order = KNOWN_STATES + [k for k in counts.index if k not in KNOWN_STATES]
-    out = pd.DataFrame({"acState": order, "eligible figures": [int(counts.get(k, 0)) for k in order]})
-    out["known"] = out["acState"].isin(KNOWN_STATES)
-    unknown = out.loc[~out["known"] & (out["eligible figures"] > 0), "acState"].tolist()
-    if unknown:
-        print(f"[selection] flight states outside the codebook list (reported, not dropped): {unknown}")
-    return out
-
-
-def main_state_gate_effect(c: pd.DataFrame, cfg: Dict[str, Any], states: List[str] | None = None) -> Dict[str, Any]:
-    """What the optional main-set gate would do if switched on, whatever its current setting:
-    main figures in the gated states, how many aircraft would switch to another figure, and
-    how many would have no main figure left (they would leave the main set)."""
-    states = states or list(cfg["selection"].get("main_state_gate_states", ["Both", "Other"]))
-    tie = list(cfg["selection"].get("tie_break_perspective", []))
-    elig = c[c["eligible"]]
-    now = _one_per_aircraft(elig, tie)
-    gated = now[now["acState"].isin(states)]
-    left = elig[~elig["acState"].isin(states)]
-    has_other = gated["aircraft_uid"].isin(set(left["aircraft_uid"]))
-    return {
-        "gate_states": states,
-        "gate_on": bool(cfg["selection"].get("main_state_gate", False)),
-        "main_figures": int(len(now)),
-        "main_figures_in_gated_states": int(len(gated)),
-        "by_state": {k: int(v) for k, v in gated["acState"].value_counts().items()},
-        "aircraft_switching_to_another_figure": int(has_other.sum()),
-        "aircraft_leaving_main": int((~has_other).sum()),
-        "aircraft_leaving_main_ids": sorted(gated.loc[~has_other, "aircraft_uid"].tolist()),
-    }
 
 
 # ── persist ──────────────────────────────────────────────────────────────────
@@ -337,11 +265,6 @@ def save(c: pd.DataFrame, funnel: pd.DataFrame, aircraft: pd.DataFrame,
         "sets": {k: {"figures": int(len(v)), "aircraft": int(v["aircraft_uid"].nunique())}
                  for k, v in sets.items()},
         "aircraft_in_every_set": int(len(common)),
-        "flight_states": dict(zip(state_check(c)["acState"], state_check(c)["eligible figures"].astype(int))),
-        "main_state_gate_effect": {k: v for k, v in main_state_gate_effect(c, cfg).items()
-                                   if k != "aircraft_leaving_main_ids"},
-        "unclassifiable_g1_override": int((aircraft["type_group"] == UNCLASSIFIABLE).sum())
-        if "type_group" in aircraft.columns else None,
         "union_figures": int(len(union)),
     }
     (d / "selection_summary.json").write_text(json.dumps(summary, indent=2, default=str),

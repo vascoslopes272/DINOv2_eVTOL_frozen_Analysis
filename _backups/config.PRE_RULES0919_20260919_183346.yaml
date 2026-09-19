@@ -110,14 +110,6 @@ selection:
   whole_vehicle_only: true       # refinement 3: only "Whole Vehicle Layout" figures
   exclude_quality: []            # e.g. [poor_quality, generic]
   exclude_styles: []             # e.g. [Render, Draft] — acSty values
-  # Main-set flight-state gate (rulings 2026-09-19). true -> the `main` set skips figures whose
-  # acState is Both (moving part drawn in two positions with equal weight) or Other (no
-  # configuration readable) and takes the aircraft's next figure. DEFAULT OFF: switching it on
-  # changes the main set and forces re-extraction downstream (21, 22, 23). Notebook 20 prints what
-  # it would change (main_state_gate_effect). The hover / cruise / invariant sets are allowlists
-  # and never take a Both or Other figure, gate or no gate.
-  main_state_gate: false
-  main_state_gate_states: [Both, Other]
   # When a strategy has several candidate figures for one aircraft: main image
   # first, then this perspective order, then quality "clean", then figure order.
   tie_break_perspective: [Front-Isometric, Rear-Isometric, Side, Front, Top, Back, Bottom/Down]
