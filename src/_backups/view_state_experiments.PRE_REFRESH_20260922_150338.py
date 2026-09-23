@@ -68,10 +68,8 @@ VARIANT = {"TW", "TR", "DS", "CVT", "SRW"}
 # variant aircraft it means the drawing fits both hover and cruise -> "Both" (user,
 # 2026-09-18), ranked right after the canonical state. Ground/Unclear/NonApplicable
 # are retired ids that old records may still hold. A blank label is "Missing" (never imputed).
-# The wizard's own "Both" (2026-09-19: the moving part drawn in both positions) also shows
-# both states, so it joins the same group (2026-09-22).
 STATE_VARIANT = {
-    "Hover": "Hover", "Cruise": "Cruise", "Invariant": "Both", "Both": "Both",
+    "Hover": "Hover", "Cruise": "Cruise", "Invariant": "Both",
     "Transition": "Other", "Other": "Other",
     "Ground": "Other", "Unclear": "Other", "NonApplicable": "Other",
 }
