@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>evtol.news year review</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--card:#f6f6f8;--ink:#1d1d1f;--mute:#6e6e73;--line:#e3e3e8;--acc:#0969da;--ok:#1a7f37;--no:#cf222e}
+@media (prefers-color-scheme:dark){:root{--bg:#161618;--card:#202024;--ink:#e8e8ea;--mute:#9a9aa0;--line:#333338;--acc:#4f9cf9}}
+*{box-sizing:border-box}body{background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif;margin:0 16px 60px}
+a{color:var(--acc)}header{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.bar{flex:1 1 200px;height:8px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ok)}
+.m{color:var(--mute);font-size:13px}select,button{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer}
+kbd{font:12px ui-monospace,monospace;border:1px solid currentColor;border-radius:4px;padding:0 4px;opacity:.8}
+main{max-width:860px;margin:40px auto;text-align:center}h2{margin:0 0 4px;font-size:22px}
+.cls{display:inline-block;font-weight:700;padding:1px 8px;border-radius:5px;background:var(--card);margin-left:6px;font-size:15px}
+.year{font-size:64px;font-weight:800;margin:26px 0 6px;line-height:1}.sent{font-size:20px;line-height:1.55;margin:10px auto 8px;max-width:760px}
+.btns{display:flex;justify-content:center;gap:14px;margin:28px 0 10px;flex-wrap:wrap}.btns button{font-size:18px;padding:10px 26px}
+.yes{background:var(--ok)!important;color:#fff!important;border-color:var(--ok)!important}.nope{background:var(--no)!important;color:#fff!important;border-color:var(--no)!important}
+.tag{font-size:12px;border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--mute)}.done{color:var(--ok);font-weight:700}
+</style></head><body>
+<header><b>evtol.news · development-start year</b>
+<select id=flt><option value=todo>to review</option><option value=all>all</option><option value=done>reviewed</option></select>
+<select id=cls><option value="">all classes</option><option>VT</option><option>LC</option><option>WM</option><option>ER</option><option>HB</option></select>
+<div class=bar><i id=bar></i></div><span id=prog class=m></span>
+<button id=exp>export CSV</button><button id=imp>import CSV</button><input type=file id=impf accept=".csv" hidden></header>
+<main id=main></main>
+<script>
+const A=__DATA__;const K='evtolnewsYearReview_v2';let D={};try{D=JSON.parse(localStorage.getItem(K)||'{}')}catch(e){}
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const enc=s=>encodeURIComponent(s).replace(/-/g,'%2D');
+const frag=(u,s)=>{const w=s.split(/\s+/);return u+'#:~:text='+(w.length<=12?enc(s):enc(w.slice(0,6).join(' '))+','+enc(w.slice(-4).join(' ')))};
+// candidate order: the readers' sentence(s) first, then every other dated sentence of the page, earliest year first
+function cands(a){const by=Object.fromEntries(a.e.map(x=>[x[0],x]));const first=[a.pid,a.ia,a.ib].filter((v,i,arr)=>v&&by[v]&&arr.indexOf(v)===i);
+ const rest=a.e.filter(x=>!first.includes(x[0])).sort((x,y)=>(x[1]||'9999').localeCompare(y[1]||'9999'));return[...first.map(i=>by[i]),...rest]}
+let list=[],pos=0,k=0;
+function save(){try{localStorage.setItem(K,JSON.stringify(D))}catch(e){}}
+function match(a){if(cls.value&&a.c!==cls.value)return false;return flt.value==='all'||(flt.value==='todo'?!D[a.s]:!!D[a.s])}
+function rebuild(){list=A.filter(match);pos=0;k=0;draw()}
+function progress(){const v=Object.values(D);bar.style.width=(100*v.length/A.length)+'%';
+ prog.textContent=`${v.length} / ${A.length} reviewed · ${v.filter(d=>d.action==='confirmed').length} proposal valid · ${v.filter(d=>d.action==='changed').length} other sentence · ${v.filter(d=>d.action==='not_stated').length} not stated`}
+function draw(){progress();const a=list[pos];if(!a){main.innerHTML='<p>Nothing left to review in this view. Export the CSV.</p>';return}
+ const c=cands(a),x=c[k],d=D[a.s];
+ const head=`<h2><a href="${esc(a.u)}" target=evtolnews>${esc(a.n)}</a><span class=cls>${esc(a.c)}</span></h2><div class=m>${esc(a.co)} · ${esc(a.st)} · aircraft ${pos+1} of ${list.length}${d?' · <span class=done>reviewed: '+(d.year||'not stated')+'</span>':''}</div>`;
+ if(!x){main.innerHTML=head+`<div class=year>—</div><p class=sent>${c.length?'No other sentence on this page gives the year of this aircraft.':'This page has no dated sentence.'}</p>
+  <div class=btns><button class=nope id=bN>not stated <kbd>Enter</kbd></button><button id=bB>← back <kbd>←</kbd></button></div>`;
+  bN.onclick=()=>decide(a,null);bB.onclick=back;return}
+ const who=x[0]===a.pid?'proposed':x[0]===a.ia||x[0]===a.ib?'proposed by one reader':'other sentence on the page';
+ const yr=String(x[1]).split(' ')[0];
+ main.innerHTML=head+`<div class=year>${esc(yr)}</div><div class=m>${who} · sentence ${k+1} of ${c.length}${x[2]?' · <span class=tag>cited source</span>':''}</div>
+ <p class=sent>${esc(x[3])}</p><a href="${esc(frag(a.u,x[3]))}" target=evtolnews>see it on the page ↗</a>
+ <div class=btns><button class=yes id=bY>✓ valid <kbd>Enter</kbd></button><button class=nope id=bX>✗ not valid <kbd>X</kbd></button><button id=bB>← back <kbd>←</kbd></button></div>
+ <div class=m>Valid = this sentence dates the development of THIS aircraft (design or program start, announcement, first flight, a source about it).<br>Not: company founding, another model, planned dates. <kbd>N</kbd> = no sentence on this page will do.</div>`;
+ bY.onclick=()=>decide(a,x);bX.onclick=()=>{k++;draw()};bB.onclick=back}
+function decide(a,x){const yr=x?String(x[1]).split(' ')[0]:'';
+ D[a.s]={year:yr,id:x?x[0]:'',action:!x?'not_stated':(x[0]===a.pid||(yr===a.py&&a.py))?'confirmed':'changed',t:new Date().toISOString()};save();
+ if(flt.value==='todo')list=A.filter(match);else pos++;k=0;if(pos>=list.length)pos=Math.max(0,list.length-1);draw()}
+function back(){if(k>0){k--;draw();return}if(flt.value==='todo'){flt.value='all';list=A.filter(match);}const cur=list[pos];pos=Math.max(0,(cur?list.indexOf(cur):pos)-1);k=0;draw()}
+document.onkeydown=e=>{if(e.target.tagName==='SELECT')return;const a=list[pos];if(!a)return;const x=cands(a)[k];
+ if(e.key==='Enter'){x?decide(a,x):decide(a,null)}else if(e.key==='x'||e.key==='X'){if(x){k++;draw()}}else if(e.key==='n'||e.key==='N')decide(a,null);
+ else if(e.key==='ArrowLeft')back();else if(e.key==='o'||e.key==='O'){if(x)window.open(frag(a.u,x[3]),'evtolnews')}else return;e.preventDefault()};
+flt.onchange=rebuild;cls.onchange=rebuild;
+const csvq=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+exp.onclick=()=>{const by=Object.fromEntries(A.map(a=>[a.s,a]));const rows=[['slug_key','year','evidence_id','action','note','proposed_year','proposed_status','reviewed_at']];
+ for(const[s,d]of Object.entries(D)){const a=by[s]||{};rows.push([s,d.year,d.id,d.action,'',a.py||'',a.ps||'',d.t])}
+ const l=document.createElement('a');l.href=URL.createObjectURL(new Blob([rows.map(r=>r.map(csvq).join(',')).join('\n')+'\n'],{type:'text/csv'}));l.download='YEAR_REVIEW.csv';l.click()};
+function parseCSV(t){const out=[];let row=[],f='',q=false;for(let i=0;i<t.length;i++){const c=t[i];
+ if(q){if(c==='"'){if(t[i+1]==='"'){f+='"';i++}else q=false}else f+=c}else if(c==='"')q=true;else if(c===','){row.push(f);f=''}
+ else if(c==='\n'||c==='\r'){if(c==='\r'&&t[i+1]==='\n')i++;row.push(f);f='';if(row.length>1||row[0])out.push(row);row=[]}else f+=c}
+ if(f||row.length){row.push(f);out.push(row)}return out}
+imp.onclick=()=>impf.click();impf.onchange=async()=>{const r=parseCSV(await impf.files[0].text());const h=r.shift(),ix=n=>h.indexOf(n);let n=0;
+ for(const x of r){const s=x[ix('slug_key')];if(!s)continue;D[s]={year:x[ix('year')]||'',id:x[ix('evidence_id')]||'',action:x[ix('action')]||'changed',t:x[ix('reviewed_at')]||''};n++}
+ save();alert(n+' decisions imported');rebuild()};
+rebuild();
+</script></body></html>
