@@ -149,19 +149,15 @@ def run_make(cfg: Dict[str, Any], variant: str, workers: int = 12) -> pd.DataFra
 
 
 # ── process + extract (notebooks 21-22's code on the copies) ────────────────
-def run_process(cfg: Dict[str, Any], variant: str, force: bool = False) -> pd.DataFrame:
+def run_process(cfg: Dict[str, Any], variant: str) -> pd.DataFrame:
     man = pd.read_csv(variant_root(cfg, variant) / "sources_manifest.csv", keep_default_na=False)
-    return IP.process_all(man, variant_cfg(cfg, variant), SIZE, force=force)
+    return IP.process_all(man, variant_cfg(cfg, variant), SIZE)
 
 
-def run_extract(cfg: Dict[str, Any], variant: str, force: bool = False) -> Path:
-    # resolve transformers' lazy imports once before the per-GPU threads: two shards
-    # importing AutoImageProcessor at once race the lazy module loader (ImportError)
-    from transformers import AutoImageProcessor, AutoModel  # noqa: F401
-
+def run_extract(cfg: Dict[str, Any], variant: str) -> Path:
     from . import embeddings as EM
 
-    out = EM.run_extraction(variant_cfg(cfg, variant), SIZE, force=force)
+    out = EM.run_extraction(variant_cfg(cfg, variant), SIZE)
     check(cfg, variant)
     return out
 

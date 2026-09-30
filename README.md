@@ -12,13 +12,29 @@ this repo's outputs.
 
 Stage 2 of the pipeline (stage 0 is labelling in `Patent-Labelling-Tools`,
 stage 1 and stage 3 are in `eVTOL-Visual-Evaluation`). `notebooks/` holds
-exactly three notebooks, run in order:
+three pipeline notebooks, run in order, and three experiment notebooks
+(see [Notebooks 20–25](#notebooks-2025)):
 
 | Notebook | What it does | Writes (under `paths.pipeline_root`) |
 |---|---|---|
 | `20_figure_selection` | **Chooses the figures from the labels only**, without opening any image. It applies fixed gates (approved, domain gate, D1/D2 duplicates, whole-aircraft only), records the selection funnel, and builds one named figure set per strategy (main, all, hover, cruise, per-perspective, line-only, …). It also writes a coverage matrix and a select/report split of the aircraft. | `selection/` |
 | `21_image_processing` | Rotates the selected raw crops (`1639_LABELLED/joined/approved_images`) by `rotation_deg`, resizes them with the aspect ratio kept, and pads them to a square, once per size (224, 518). | `processed/<size>/` |
 | `22_embedding_extraction` | Embeds the **union** of all sets once for each size, with frozen DINOv2 (every layer × pooling). A set is just a subset of these rows. | `embeddings/<tag>/` |
+
+## Notebooks 20–25
+
+Every result is reproduced by a numbered notebook that is a thin driver over
+`src/` (the `scripts/` runners call the same functions). Each skips work
+already on disk; 25 has a `FORCE` flag to rebuild.
+
+| Notebook | One line | `src/` modules |
+|---|---|---|
+| `20_figure_selection` | Figure sets from the labels only (gates, funnel, coverage, split). | `figure_selection` |
+| `21_image_processing` | Rotate, resize and pad the selected crops to 224 / 518 px. | `image_processing` |
+| `22_embedding_extraction` | Frozen DINOv2-large embeddings of every processed figure (layers × pooling). | `embeddings` |
+| `23_view_state_experiments` | Which figure represents an aircraft: view-first, state-first, main, slot-mean manifests and matrices. | `view_state_experiments` |
+| `24_evtolnews_extraction` | evtol.news photo set: crawl, whole-aircraft filter, sets, processing, extraction, CLS attention. | `evtolnews`, `evtolnews_sets`, `attention_maps` |
+| `25_setup_experiments` | Setup-selection extraction side: registers-model embeddings + attention + artifact share, photo crop test (OWLv2 crops, base + registers), drawing thick1/thick2 and photo grey variants, drawing grey/contrast controls + ink table + montages. | `registers_experiment`, `photo_crop_experiment`, `preprocess_variants`, `preprocess_controls` |
 
 The embeddings are evaluated by
 `eVTOL-Visual-Evaluation/embedding_evaluation/notebooks/30_embedding_evaluation.ipynb`

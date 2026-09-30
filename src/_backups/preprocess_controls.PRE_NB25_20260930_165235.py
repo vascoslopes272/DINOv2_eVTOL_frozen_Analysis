@@ -142,9 +142,9 @@ def run_make(cfg: Dict[str, Any], variant: str, workers: int = 12) -> pd.DataFra
     return man
 
 
-def run_process(cfg: Dict[str, Any], variant: str, force: bool = False) -> pd.DataFrame:
+def run_process(cfg: Dict[str, Any], variant: str) -> pd.DataFrame:
     man = pd.read_csv(variant_root(cfg, variant) / "sources_manifest.csv", keep_default_na=False)
-    out = IP.process_all(man, variant_cfg(cfg, variant), SIZE, force=force)
+    out = IP.process_all(man, variant_cfg(cfg, variant), SIZE)
     if variant == "contrast":   # the resize of a 518 square to 518 must be the identity
         for s, p in zip(man.approved_copy_path.iloc[:20], out.path.iloc[:20]):
             assert np.array_equal(np.asarray(Image.open(s).convert("RGB")),
@@ -152,13 +152,13 @@ def run_process(cfg: Dict[str, Any], variant: str, force: bool = False) -> pd.Da
     return out
 
 
-def run_extract(cfg: Dict[str, Any], variant: str, force: bool = False) -> Path:
+def run_extract(cfg: Dict[str, Any], variant: str) -> Path:
     # resolve transformers' lazy imports once before the per-GPU threads (import race)
     from transformers import AutoImageProcessor, AutoModel  # noqa: F401
 
     from . import embeddings as EM
 
-    out = EM.run_extraction(variant_cfg(cfg, variant), SIZE, force=force)
+    out = EM.run_extraction(variant_cfg(cfg, variant), SIZE)
     check(cfg, variant)
     return out
 

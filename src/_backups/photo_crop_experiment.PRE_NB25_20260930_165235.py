@@ -22,10 +22,6 @@ process   the crops through the SAME path as the originals
           white 518x518 square)
 extract   the SAME extraction (``embeddings.run_extraction``, frozen
           dinov2-large, layers 18/22/24, cls + mean_patch)
-extract_registers
-          the same crops through dinov2-with-registers-large
-          (``embeddings/dinov2-reg-large_518/``; evaluated by
-          ``scripts/photo_crop_registers.py evaluate report``)
 montage   original | crop pairs, stratified over the 5 classes, to eyeball the
           detector (wrong object, truncated aircraft)
 evaluate  ``embedding_protocol.knn`` (kNN-5 maker-held-out balanced accuracy,
@@ -206,33 +202,18 @@ def run_detect(cfg: Dict[str, Any], per_class: int = 0) -> pd.DataFrame:
 
 
 # ── process + extract (notebooks 21-22's code on the crops) ─────────────────
-def run_process(cfg: Dict[str, Any], force: bool = False) -> None:
+def run_process(cfg: Dict[str, Any]) -> None:
     from . import image_processing as IP
 
     man = pd.read_csv(exp_root(cfg) / "crop_manifest.csv", keep_default_na=False)
     figures = man.assign(approved_copy_path=man.crop_path)
-    IP.process_all(figures, exp_cfg(cfg), SIZE, force=force)
+    IP.process_all(figures, exp_cfg(cfg), SIZE)
 
 
-def run_extract(cfg: Dict[str, Any], force: bool = False) -> None:
-    # resolve transformers' lazy imports once before the per-GPU threads (import race)
-    from transformers import AutoImageProcessor, AutoModel  # noqa: F401
-
+def run_extract(cfg: Dict[str, Any]) -> None:
     from . import embeddings as EM
 
-    EM.run_extraction(exp_cfg(cfg), SIZE, force=force)
-
-
-def run_extract_registers(cfg: Dict[str, Any], force: bool = False) -> Path:
-    """The same processed crops through the chapter's model (dinov2-with-registers-large)
-    -> ``crop_experiment/embeddings/dinov2-reg-large_518/`` (review flag M5; was
-    ``scripts/photo_crop_registers.py extract``). Skipped when the figure set matches."""
-    from transformers import AutoImageProcessor, AutoModel  # noqa: F401  (import race)
-
-    from . import embeddings as EM
-    from .registers_experiment import reg_cfg
-
-    return EM.run_extraction(reg_cfg(exp_cfg(cfg)), SIZE, force=force)
+    EM.run_extraction(exp_cfg(cfg), SIZE)
 
 
 # ── montage (original | crop pairs, to judge the detector by eye) ───────────

@@ -40,19 +40,14 @@ def reg_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
             "extraction": {**cfg["extraction"], "tag": REG_TAG}}
 
 
-def run_extract(cfg: Dict[str, Any], size: int = 518, force: bool = False) -> None:
-    """Registers embeddings for the patent figures and the photo sets, same manifests as base.
-    Skipped per tree when the saved figure set matches, unless ``force``."""
-    # resolve transformers' lazy imports once before the per-GPU threads (import race)
-    from transformers import AutoImageProcessor, AutoModel  # noqa: F401
-
-    EM.run_extraction(reg_cfg(cfg), size, force=force)                      # patents
-    EM.run_extraction(reg_cfg(E.pipeline_cfg(cfg)), size, force=force)      # photos
+def run_extract(cfg: Dict[str, Any], size: int = 518) -> None:
+    """Registers embeddings for the patent figures and the photo sets, same manifests as base."""
+    EM.run_extraction(reg_cfg(cfg), size)                      # patents
+    EM.run_extraction(reg_cfg(E.pipeline_cfg(cfg)), size)      # photos
 
 
-def run_attention(cfg: Dict[str, Any], size: int = 518, force: bool = False) -> None:
-    """Registers CLS attention on exactly the images of the base attention run (main sets).
-    Skipped per source when the saved manifest matches, unless ``force``."""
+def run_attention(cfg: Dict[str, Any], size: int = 518) -> None:
+    """Registers CLS attention on exactly the images of the base attention run (main sets)."""
     pcfg = E.pipeline_cfg(cfg)
     root = Path(pcfg["paths"]["pipeline_root"])
     rcfg = reg_cfg(pcfg)
@@ -61,7 +56,7 @@ def run_attention(cfg: Dict[str, Any], size: int = 518, force: bool = False) -> 
         man = pd.read_csv(proc_root / "processed" / str(size) / "manifest.csv")
         main = pd.read_csv(proc_root / "selection" / "sets" / "main.csv", keep_default_na=False)
         man = man[man.figure_uid.isin(set(main.figure_uid))]
-        AM.run(rcfg, man, out, name, size=size, force=force)
+        AM.run(rcfg, man, out, name, size=size)
 
 
 def run_share(cfg: Dict[str, Any], size: int = 518) -> Path:

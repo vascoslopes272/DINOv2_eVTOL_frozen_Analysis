@@ -37,14 +37,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src import evtolnews as E  # noqa: E402
 from src import photo_crop_experiment as X  # noqa: E402
 from src.config_loader import load_config  # noqa: E402
-from src.registers_experiment import REG_TAG  # noqa: E402
+from src.registers_experiment import REG_TAG, reg_cfg  # noqa: E402
 
 STEPS = ["extract", "evaluate", "report"]
 
 
 def run_extract(cfg) -> None:
-    # the logic lives in src (notebook 25 calls it too); the lazy-import guard is there
-    X.run_extract_registers(cfg)
+    # resolve transformers' lazy imports ONCE before the per-GPU threads: two shards
+    # importing concurrently race the lazy module loader (seen again 2026-09-30)
+    from transformers import AutoImageProcessor, AutoModel  # noqa: F401
+
+    from src import embeddings as EM
+
+    EM.run_extraction(reg_cfg(X.exp_cfg(cfg)), X.SIZE)
 
 
 def run_evaluate(cfg) -> pd.DataFrame:
