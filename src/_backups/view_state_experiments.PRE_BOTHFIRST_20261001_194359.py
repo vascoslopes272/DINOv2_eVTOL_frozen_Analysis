@@ -66,8 +66,7 @@ VARIANT = {"TW", "TR", "DS", "CVT", "SRW"}
 # Labelled acState -> state4 for a VARIANT aircraft. Notebook 04 writes the wizard's
 # display name 'Invariant' (stored id 'HoverCruise', recoded since 2026-09-18); on a
 # variant aircraft it means the drawing fits both hover and cruise -> "Both" (user,
-# 2026-09-18). Since 2026-10-01 (author ruling) Both ranks FIRST, before the canonical state:
-# a drawing that shows the moving part in both positions is the best state. Ground/Unclear/NonApplicable
+# 2026-09-18), ranked right after the canonical state. Ground/Unclear/NonApplicable
 # are retired ids that old records may still hold. A blank label is "Missing" (never imputed).
 # The wizard's own "Both" (2026-09-19: the moving part drawn in both positions) also shows
 # both states, so it joins the same group (2026-09-22).
@@ -264,12 +263,11 @@ MANIFEST_COLS = ["aircraft_id", "patent_id", "fig_id", "image_path", "slot", "vi
 
 
 def state_rank(state4: pd.Series, canonical: str = CANONICAL_STATE) -> pd.Series:
-    """Both (fits hover and cruise) > canonical > other real state > Other > Missing
-    (author ruling 2026-10-01: Both first; before it, canonical > Both).
+    """canonical > Both (fits hover and cruise) > other real state > Other > Missing.
     'Invariant' ranks with the canonical state: an invariant aircraft's figures all
     carry it, so it never competes."""
     other_real = [s for s in REAL_STATES if s != canonical]
-    order = {"Both": 0, canonical: 1, "Invariant": 1, **{s: 2 for s in other_real}, "Other": 3, "Missing": 4}
+    order = {canonical: 0, "Invariant": 0, "Both": 1, **{s: 2 for s in other_real}, "Other": 3, "Missing": 4}
     bad = sorted(set(state4) - set(order))
     if bad:
         raise ValueError(f"state4 values without a rank: {bad}")
@@ -604,7 +602,7 @@ def write_report(path: Path, *, ov: pd.DataFrame, n_common: int, n_slots: Dict[i
         "",
         _md_table(pd.DataFrame([{"file": k, "rows": v} for k, v in sizes.items()])),
         "",
-        "Order rules — exp1: view (Perspective > Plan > Side > FrontRear), then state (Both > canonical > other real state > "
+        "Order rules — exp1: view (Perspective > Plan > Side > FrontRear), then state (canonical > Both > other real state > "
         "Other > Missing), then lowest fig_number, then fig_id. exp2: state first, then view, same tie-break. "
         "exp3: the labeller's main figure (exp1's pick, flagged, for the conflicts below). "
         "exp4: per slot (Perspective, Plan, Side), state then fig_number; an aircraft with none of the three slots "

@@ -1,0 +1,66 @@
+# =============================================================================
+# eVTOL-Visual-Evaluation / embedding_evaluation — config
+# =============================================================================
+# Stage 3 — evaluation of the embeddings (notebooks/30_embedding_evaluation):
+# label-free metrics per embedding run x figure set, figures, report.
+#
+# Consumes (does not produce), from eVTOL-Embedding-Extraction (stage 2):
+#   - <pipeline_root>/selection/        figure sets (notebook 20)
+#   - <pipeline_root>/embeddings/<tag>/ embeddings (notebook 22)
+# labels_parquet / embeddings_root / taxonomy below serve only the archived
+# probes + structure-clustering notebooks (archive/notebooks/).
+# =============================================================================
+
+paths:
+  labels_parquet: "EDIT-ME"   # eVTOL-Embedding-Extraction's taxonomy.output_dir/labels_v1.parquet
+  embeddings_root: "EDIT-ME"  # parent dir containing one subfolder per pipeline (see registry.py)
+  # eVTOL-Embedding-Extraction's paths.pipeline_root (notebooks 20–22):
+  # selection/ (figure sets), processed/, embeddings/<tag>/. Read-only here.
+  pipeline_root: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1639_LABELLED/2_embedding_extraction"
+  # Where 30_embedding_evaluation writes its numbers (metrics/<tag>/<set>/).
+  metrics_dir: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1639_LABELLED/3_embedding_evaluation/metrics"
+  # Report + figures (repo-root docs/, shared).
+  embedding_report_dir: "../docs/embedding_evaluation"
+
+
+# ── 30_embedding_evaluation ─────────────────────────────────────────────────
+# Label-free metrics for every embedding run x figure set (src/embedding_metrics.py).
+metrics:
+  embeddings: ["dinov2-large_224", "dinov2-large_518"]   # embeddings/<tag>/ (missing ones skipped)
+  sets: []                       # [] = every set in selection/sets/
+  aircraft_scope: own            # own = each set's own aircraft | common = only aircraft in every set
+  cluster_k_sweep: [2, 3, 4, 5, 6, 8, 10]
+  hdbscan_min_cluster: 4
+  bootstrap_n: 30
+  max_plot_pairs: 50000          # distance samples kept per matrix for the figures
+
+# Report (src/embedding_report.py): sections A–D in full for this run + set.
+report:
+  detail_embedding: "dinov2-large_518"
+  detail_set: main
+
+# ── evtol.news photo set (src/evtolnews_eval.py, scripts/evtolnews_eval.py) ──
+# Built by eVTOL-Embedding-Extraction/scripts/evtolnews_pipeline.py. Private:
+# images are (c) their owners; nothing is published before asking the source.
+evtolnews:
+  root: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/EVTOLNEWS_DS"
+  labelled_root: "/mnt/storage_11tb/Drive_files_to_syncronize/3 - Images DataSets & Labelling Outputs/1639_LABELLED"
+  embeddings: ["dinov2-large_224", "dinov2-large_518"]
+  sets: [main, all]              # sets that exist in BOTH trees (class metrics compare photo vs patent)
+
+# ── legacy (archived notebooks 20_probes / 21_structure_clustering) ─────────
+taxonomy:
+  n_folds: 5
+  reference_matrix: [22, mean_patch]   # matrix used for UMAP / clustering (pipeline: dinov2_frozen)
+  umap_color_attrs:           # attributes colored in the Stage-2 UMAP grid
+    - G1_topType
+    - M2_wCount
+    - M2_wingConf
+    - M1_boomsPresent
+    - M1_fusShape
+    - M1_gearArch
+  confound_cols: [assignee, assignee_country, year_bin, perspective,
+                  acSty, acCol, bgSty, parts, qualityFlag]
+  external_cols: [cpc_subclass, cpc_first]   # CPC = patent-office classification
+
+seed: 42
